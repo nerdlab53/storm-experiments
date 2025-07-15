@@ -4,7 +4,7 @@
 
 [Paper & OpenReview](https://openreview.net/forum?id=WxnrX42rnS), you may find some useful discussion there.
 
-This repo contains an implementation of STORM. 
+This repo contains an implementation of STORM. **NOTE** : Please read [changes.md](./changes.md) to see details about novelty detection and progressive masking implementation.
 
 Following the **Training and Evaluating Instructions** to reproduce the main results presented in our paper. One may also find **Additional Useful Information** useful when debugging and observing intermediate results. To reproduce the speed metrics mentioned in the paper, please see **Reproducing Speed Metrics**.
 
