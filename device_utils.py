@@ -1,6 +1,7 @@
 """
 Device utilities for automatic device detection and management
 Supports CUDA, MPS (Apple Silicon), and CPU
+Was running on mps first, big mistake
 """
 
 import torch

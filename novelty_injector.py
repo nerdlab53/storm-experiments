@@ -1,3 +1,5 @@
+## TO TEST IF WE'RE ABLE TO DETECT NOVELTIES OR NOT
+
 import numpy as np
 import torch
 import cv2
