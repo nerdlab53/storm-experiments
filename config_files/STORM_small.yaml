@@ -1,0 +1,45 @@
+Task: "JointTrainAgent"
+
+BasicSettings:
+  Seed: 42
+  ImageSize: 64
+  ReplayBufferOnGPU: True
+
+JointTrainAgent:
+  SampleMaxSteps: 25000  # Reduced from 102000 to 25k
+  BufferMaxLength: 20000  # Reduced proportionally
+  BufferWarmUp: 512      # Reduced from 1024
+  NumEnvs: 1
+  BatchSize: 12          # Slightly reduced
+  DemonstrationBatchSize: 3
+  BatchLength: 48        # Reduced from 64
+  ImagineBatchSize: 512  # Reduced from 1024
+  ImagineDemonstrationBatchSize: 128
+  ImagineContextLength: 6  # Reduced from 8
+  ImagineBatchLength: 12   # Reduced from 16
+  TrainDynamicsEverySteps: 1
+  TrainAgentEverySteps: 1
+  UseDemonstration: False
+  SaveEverySteps: 1250   # Save every 5% of total steps
+
+Models:
+  WorldModel:
+    InChannels: 3
+    TransformerMaxLength: 48    # Reduced from 64
+    TransformerHiddenDim: 384   # Reduced from 512
+    TransformerNumLayers: 2
+    TransformerNumHeads: 6      # Reduced from 8
+    # Progressive masking settings - softer mask for learning from farther past
+    UseProgressiveMasking: True
+    UseProgressiveInKVCache: False  # DISABLED to prevent double masking
+    UseMildDecayInKV: False         # Not needed since KV masking is disabled
+
+  Agent:
+    NumLayers: 2
+    HiddenDim: 384      # Matched to transformer hidden dim
+    Gamma: 0.985
+    Lambda: 0.95
+    EntropyCoef: 3E-4
+
+  NoveltyDetection:
+    Enabled: False  # Disabled for smaller/faster training 

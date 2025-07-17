@@ -25,7 +25,7 @@ def get_vector_mask(batch_length, device):
     return mask
 
 
-def get_progressive_causal_mask(batch_length, device, decay_factor=0.9, min_weight=0.1):
+def get_progressive_causal_mask(batch_length, device, decay_factor=0.95, min_weight=0.3):
     mask = torch.full((1, batch_length, batch_length), float('-inf'), device=device)
     for i in range(batch_length):
         for j in range(i + 1):  # only past and current positions (causal)
@@ -34,7 +34,7 @@ def get_progressive_causal_mask(batch_length, device, decay_factor=0.9, min_weig
                 # current timestep gets no penalty
                 mask[0, i, j] = 0.0
             else:
-                # apply progressive penalty to older timesteps
+                # apply progressive penalty to older timesteps - softer mask for better long-term learning
                 target_weight = max(min_weight, decay_factor ** distance)
                 # convert to log space penalty
                 penalty = torch.log(torch.tensor(target_weight, device=device))
