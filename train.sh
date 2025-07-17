@@ -1,4 +1,4 @@
-env_name=MsPacman
+env_name=Pong
 python -u train.py \
     -n "${env_name}-life_done-wm_2L512D8H-25k-seed1" \
     -seed 1 \

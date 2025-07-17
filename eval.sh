@@ -1,4 +1,4 @@
-env_name=MsPacman
+env_name=Pong
 python -u eval.py \
     -env_name "ALE/${env_name}-v5" \
     -run_name "${env_name}-life_done-wm_2L512D8H-25k-seed1"\

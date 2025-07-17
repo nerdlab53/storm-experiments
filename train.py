@@ -80,6 +80,8 @@ def world_model_imagine_data(replay_buffer: ReplayBuffer,
 
     sample_obs, sample_action, sample_reward, sample_termination = replay_buffer.sample(
         imagine_batch_size, imagine_demonstration_batch_size, imagine_context_length)
+    # Convert observations from H W C to C H W format for the encoder
+    sample_obs = rearrange(sample_obs, "B L H W C -> B L C H W")
     latent, action, reward_hat, termination_hat = world_model.imagine_data(
         agent, sample_obs, sample_action,
         imagine_batch_size=imagine_batch_size+imagine_demonstration_batch_size,
