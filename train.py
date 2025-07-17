@@ -247,7 +247,9 @@ def build_world_model(conf, action_dim):
         transformer_hidden_dim=conf.Models.WorldModel.TransformerHiddenDim,
         transformer_num_layers=conf.Models.WorldModel.TransformerNumLayers,
         transformer_num_heads=conf.Models.WorldModel.TransformerNumHeads,
-        use_progressive_masking=getattr(conf.Models.WorldModel, 'UseProgressiveMasking', True)
+        use_progressive_masking=getattr(conf.Models.WorldModel, 'UseProgressiveMasking', True),
+        use_progressive_in_kv=getattr(conf.Models.WorldModel, 'UseProgressiveInKVCache', False),
+        use_mild_decay_in_kv=getattr(conf.Models.WorldModel, 'UseMildDecayInKV', False)
     ))
     
     # Add novelty detection if enabled

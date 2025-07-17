@@ -78,6 +78,8 @@ def load_config(config_path):
     conf.Models.WorldModel.TransformerNumLayers = 0
     conf.Models.WorldModel.TransformerNumHeads = 0
     conf.Models.WorldModel.UseProgressiveMasking = False
+    conf.Models.WorldModel.UseProgressiveInKVCache = False
+    conf.Models.WorldModel.UseMildDecayInKV = False
 
     conf.Models.Agent = CN()
     conf.Models.Agent.NumLayers = 0
