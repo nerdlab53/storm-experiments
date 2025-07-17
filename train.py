@@ -61,6 +61,8 @@ def build_vec_env(env_name, image_size, num_envs, seed, novelty_config=None):
 
 def train_world_model_step(replay_buffer: ReplayBuffer, world_model: WorldModel, batch_size, demonstration_batch_size, batch_length, logger):
     obs, action, reward, termination = replay_buffer.sample(batch_size, demonstration_batch_size, batch_length)
+    # Convert observations from H W C to C H W format for the encoder
+    obs = rearrange(obs, "B L H W C -> B L C H W")
     world_model.update(obs, action, reward, termination, logger=logger)
 
 
