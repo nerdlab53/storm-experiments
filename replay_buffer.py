@@ -30,6 +30,7 @@ class ReplayBuffer:
         self.demonstration_termination = []
         self.size = 0
         self.warmup = False
+        self.has_wrapped = False  # Track if buffer has ever been full
 
     def ready(self):
         return self.warmup
@@ -46,6 +47,10 @@ class ReplayBuffer:
             self.reward_buffer[self.size] = reward
             self.termination_buffer[self.size] = termination
 
+        # Check if we're about to wrap around
+        if self.size + 1 == self.max_length//self.num_envs:
+            self.has_wrapped = True
+        
         self.size = (self.size + 1) % (self.max_length//self.num_envs)
         if len(self) >= self.warmup_length:
             self.warmup = True
@@ -81,9 +86,14 @@ class ReplayBuffer:
     def sample(self, batch_size, external_batch_size, batch_length, to_device=None):
         if to_device is None:
             to_device = DEVICE
+        
+        # Safety check: ensure we have enough data to sample
+        buffer_length = len(self)
+        if buffer_length < batch_length:
+            raise ValueError(f"Cannot sample batch_length={batch_length} from buffer with length={buffer_length}")
             
         # Sample from the replay buffer
-        starts = torch.randint(0, len(self)-batch_length+1, (batch_size,), dtype=torch.long)
+        starts = torch.randint(0, buffer_length-batch_length+1, (batch_size,), dtype=torch.long)
         
         if self.store_on_gpu:
             obs = torch.stack([self.obs_buffer[start:start+batch_length].flatten(0, 1) for start in starts])
@@ -129,6 +139,9 @@ class ReplayBuffer:
         self.demonstration_termination = data["termination"]
 
     def __len__(self):
-        if self.size == 0:
+        if self.size == 0 and not self.has_wrapped:
             return 0
-        return min(self.size, self.max_length//self.num_envs)
+        elif self.has_wrapped:
+            return self.max_length//self.num_envs
+        else:
+            return self.size
