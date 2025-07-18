@@ -23,7 +23,6 @@ import env_wrapper
 import agents
 from sub_models.functions_losses import symexp
 from sub_models.world_models import WorldModel, MSELoss
-from device_utils import get_device, move_to_device, print_device_info, DEVICE
 
 
 def process_visualize(img):
@@ -71,14 +70,14 @@ def eval_episodes(num_episode, env_name, max_steps, num_envs, image_size,
             else:
                 context_latent = world_model.encode_obs(torch.cat(list(context_obs), dim=1))
                 model_context_action = np.stack(list(context_action), axis=1)
-                model_context_action = move_to_device(torch.Tensor(model_context_action))
+                model_context_action = torch.Tensor(model_context_action).cuda()
                 prior_flattened_sample, last_dist_feat = world_model.calc_last_dist_feat(context_latent, model_context_action)
                 action = agent.sample_as_env_action(
                     torch.cat([prior_flattened_sample, last_dist_feat], dim=-1),
                     greedy=False
                 )
 
-        context_obs.append(rearrange(move_to_device(torch.Tensor(current_obs)), "B H W C -> B 1 C H W")/255)
+        context_obs.append(rearrange(torch.Tensor(current_obs).cuda(), "B H W C -> B 1 C H W")/255)
         context_action.append(action)
 
         obs, reward, done, truncated, info = vec_env.step(action)
@@ -106,38 +105,18 @@ if __name__ == "__main__":
     # ignore warnings
     import warnings
     warnings.filterwarnings('ignore')
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
 
     # parse arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("-config_path", type=str, required=True)
     parser.add_argument("-env_name", type=str, required=True)
     parser.add_argument("-run_name", type=str, required=True)
-    parser.add_argument("-device", type=str, default="auto", choices=["auto", "cpu", "cuda", "mps"], 
-                       help="Device to use for evaluation (auto, cpu, cuda, mps)")
     args = parser.parse_args()
     conf = load_config(args.config_path)
     print(colorama.Fore.RED + str(args) + colorama.Style.RESET_ALL)
-    
-    # Set up device
-    if args.device != "auto":
-        # Override device selection if specified
-        if args.device == "cpu":
-            import device_utils
-            device_utils.DEVICE = torch.device('cpu')
-        elif args.device == "cuda":
-            import device_utils
-            device_utils.DEVICE = torch.device('cuda')
-        elif args.device == "mps":
-            import device_utils
-            device_utils.DEVICE = torch.device('mps')
-    
-    # Print device information
-    print_device_info()
-    
-    # Set CUDA-specific optimizations only if using CUDA
-    if get_device().type == 'cuda':
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
+    # print(colorama.Fore.RED + str(conf) + colorama.Style.RESET_ALL)
 
     # set seed
     seed_np_torch(seed=conf.BasicSettings.Seed)
@@ -158,8 +137,8 @@ if __name__ == "__main__":
     print(steps)
     results = []
     for step in tqdm(steps):
-        world_model.load_state_dict(torch.load(f"{root_path}/world_model_{step}.pth", map_location=get_device()))
-        agent.load_state_dict(torch.load(f"{root_path}/agent_{step}.pth", map_location=get_device()))
+        world_model.load_state_dict(torch.load(f"{root_path}/world_model_{step}.pth"))
+        agent.load_state_dict(torch.load(f"{root_path}/agent_{step}.pth"))
         # # eval
         episode_avg_return = eval_episodes(
             num_episode=20,
@@ -172,8 +151,7 @@ if __name__ == "__main__":
         )
         results.append([step, episode_avg_return])
     
-    # Create eval_result directory if it doesn't exist
-    os.makedirs("eval_result", exist_ok=True)
+    os.mkdir('eval_result')
     with open(f"eval_result/{args.run_name}.csv", "w") as fout:
         fout.write("step, episode_avg_return\n")
         for step, episode_avg_return in results:
