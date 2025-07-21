@@ -253,7 +253,10 @@ def build_world_model(conf, action_dim):
         transformer_num_heads=conf.Models.WorldModel.TransformerNumHeads,
         use_progressive_masking=getattr(conf.Models.WorldModel, 'UseProgressiveMasking', True),
         use_progressive_in_kv=getattr(conf.Models.WorldModel, 'UseProgressiveInKVCache', False),
-        use_mild_decay_in_kv=getattr(conf.Models.WorldModel, 'UseMildDecayInKV', False)
+        use_mild_decay_in_kv=getattr(conf.Models.WorldModel, 'UseMildDecayInKV', False),
+        fixed_mask_percent=getattr(conf.Models.WorldModel, 'FixedMaskPercent', 0.0),
+        use_random_mask=getattr(conf.Models.WorldModel, 'UseRandomMask', False),
+        use_soft_penalty=getattr(conf.Models.WorldModel, 'UseSoftPenalty', True)
     ))
     
     # Add novelty detection if enabled

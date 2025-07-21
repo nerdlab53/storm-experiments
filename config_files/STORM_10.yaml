@@ -33,7 +33,7 @@ Models:
     UseProgressiveMasking: True
     UseProgressiveInKVCache: False
     UseMildDecayInKV: False
-    FixedMaskPercent: 0.0  # Change this for 0%, 5%, 15%, etc.
+    FixedMaskPercent: 0.1  # Change this for 0%, 5%, 15%, etc.
     UseRandomMask: False    # oldest-first masking  
     UseSoftPenalty: False    # soft penalties
 

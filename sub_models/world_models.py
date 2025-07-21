@@ -7,7 +7,7 @@ from einops.layers.torch import Rearrange
 from torch.cuda.amp import autocast
 
 from sub_models.functions_losses import SymLogTwoHotLoss
-from sub_models.attention_blocks import get_subsequent_mask_with_batch_length, get_subsequent_mask, get_progressive_causal_mask
+from sub_models.attention_blocks import get_subsequent_mask_with_batch_length, get_subsequent_mask, get_fixed_mask_causal
 from sub_models.transformer_model import StochasticTransformerKVCacheProgressive
 from device_utils import get_device, get_device_type, get_autocast_dtype, is_autocast_enabled, move_to_device, DEVICE, DEVICE_TYPE, AUTOCAST_ENABLED, AUTOCAST_DTYPE
 import agents
@@ -226,7 +226,8 @@ class CategoricalKLDivLossWithFreeBits(nn.Module):
 class WorldModel(nn.Module):
     def __init__(self, in_channels, action_dim,
                  transformer_max_length, transformer_hidden_dim, transformer_num_layers, transformer_num_heads,
-                 use_progressive_masking=True, use_progressive_in_kv=False, use_mild_decay_in_kv=False):
+                 use_progressive_masking=True, use_progressive_in_kv=False, use_mild_decay_in_kv=False,
+                 fixed_mask_percent=0.0, use_random_mask=False, use_soft_penalty=True):
         super().__init__()
         self.transformer_hidden_dim = transformer_hidden_dim
         self.final_feature_width = 4
@@ -241,9 +242,11 @@ class WorldModel(nn.Module):
         self.use_progressive_masking = use_progressive_masking  # Add this parameter
         self.use_progressive_in_kv = use_progressive_in_kv
         self.use_mild_decay_in_kv = use_mild_decay_in_kv
-
-        if self.use_progressive_masking:
-            self.progressive_mask = get_progressive_causal_mask(transformer_max_length, self.device)
+        
+        # Fixed masking parameters
+        self.fixed_mask_percent = fixed_mask_percent
+        self.use_random_mask = use_random_mask
+        self.use_soft_penalty = use_soft_penalty
 
         self.encoder = EncoderBN(
             in_channels=in_channels,
@@ -312,8 +315,14 @@ class WorldModel(nn.Module):
             
         with torch.autocast(device_type=self.device_type, dtype=self.tensor_dtype, enabled=self.use_amp):
             if progressive_mask:
-                # added the progressive masking method here
-                temporal_mask = self.progressive_mask[:, :latent.shape[1], :latent.shape[1]] 
+                # Use the new fixed masking function
+                temporal_mask = get_fixed_mask_causal(
+                    batch_length=latent.shape[1], 
+                    mask_percent=self.fixed_mask_percent,
+                    flag=self.use_random_mask,
+                    soft=self.use_soft_penalty,
+                    device=latent.device
+                )
             else:
                 temporal_mask = get_subsequent_mask(latent)
             dist_feat = self.storm_transformer(latent, action, temporal_mask)
@@ -429,7 +438,13 @@ class WorldModel(nn.Module):
 
             # transformer
             if progressive_mask:
-                temporal_mask = self.progressive_mask[:, :batch_length, :batch_length]
+                temporal_mask = get_fixed_mask_causal(
+                    batch_length=batch_length,
+                    mask_percent=self.fixed_mask_percent,
+                    flag=self.use_random_mask,
+                    soft=self.use_soft_penalty,
+                    device=flattened_sample.device
+                )
             else:
                 temporal_mask = get_subsequent_mask_with_batch_length(batch_length, flattened_sample.device)
             # transformer(post_logits_flattened, action, temporal_mask -> now will be the progressive mask) -> next_latent

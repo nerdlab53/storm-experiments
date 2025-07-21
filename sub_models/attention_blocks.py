@@ -25,31 +25,51 @@ def get_vector_mask(batch_length, device):
     return mask
 
 
-def get_progressive_causal_mask(batch_length, device, decay_factor=0.95, min_weight=0.3):
+# def get_progressive_causal_mask(batch_length, device, decay_factor=0.99, min_weight=0.5):
+#     mask = torch.full((1, batch_length, batch_length), float('-inf'), device=device)
+#     for i in range(batch_length):
+#         for j in range(i + 1):  # only past and current positions (causal)
+#             distance = i - j  # how far back in time
+#             if distance == 0:
+#                 # current timestep gets no penalty
+#                 mask[0, i, j] = 0.0
+#             else:
+#                 # apply progressive penalty to older timesteps - softer mask for better long-term learning
+#                 target_weight = max(min_weight, decay_factor ** distance)
+#                 # convert to log space penalty
+#                 penalty = torch.log(torch.tensor(target_weight, device=device))
+#                 mask[0, i, j] = penalty
+#     return mask
+
+
+# def get_progressive_attention_weights(batch_length, device, decay_factor=0.9):
+#     weights = torch.zeros((1, batch_length, batch_length), device=device)
+#     for i in range(batch_length):
+#         for j in range(i + 1):  # only past and current positions (causal)
+#             distance = i - j
+#             weight = decay_factor ** distance
+#             weights[0, i, j] = weight
+#     return weights
+
+
+def get_fixed_mask_causal(batch_length, mask_percent, flag, soft, device, soft_penalty=-1.0):
     mask = torch.full((1, batch_length, batch_length), float('-inf'), device=device)
-    for i in range(batch_length):
-        for j in range(i + 1):  # only past and current positions (causal)
-            distance = i - j  # how far back in time
-            if distance == 0:
-                # current timestep gets no penalty
-                mask[0, i, j] = 0.0
+    indices = torch.tril_indices(batch_length, batch_length, offset=0, device=device)
+    mask[0, indices[0], indices[1]] = 0.0
+    
+    for i in range(1, batch_length):
+        idx = torch.arange(0, i, device=device)
+        num_tokens = min(int(len(idx) * mask_percent), len(idx))
+        if num_tokens > 0:
+            if not flag:
+                to_mask = idx[:num_tokens]
             else:
-                # apply progressive penalty to older timesteps - softer mask for better long-term learning
-                target_weight = max(min_weight, decay_factor ** distance)
-                # convert to log space penalty
-                penalty = torch.log(torch.tensor(target_weight, device=device))
-                mask[0, i, j] = penalty
+                to_mask = idx[torch.randperm(len(idx), device=device)[:num_tokens]]
+            if soft:
+                mask[0, i, to_mask] = soft_penalty
+            else:
+                mask[0, i, to_mask] = float('-inf')
     return mask
-
-
-def get_progressive_attention_weights(batch_length, device, decay_factor=0.9):
-    weights = torch.zeros((1, batch_length, batch_length), device=device)
-    for i in range(batch_length):
-        for j in range(i + 1):  # only past and current positions (causal)
-            distance = i - j
-            weight = decay_factor ** distance
-            weights[0, i, j] = weight
-    return weights
 
 
 class ScaledDotProductAttention(nn.Module):
