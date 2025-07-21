@@ -80,6 +80,9 @@ def load_config(config_path):
     conf.Models.WorldModel.UseProgressiveMasking = False
     conf.Models.WorldModel.UseProgressiveInKVCache = False
     conf.Models.WorldModel.UseMildDecayInKV = False
+    conf.Models.WorldModel.FixedMaskPercent = 0.0
+    conf.Models.WorldModel.UseRandomMask = False
+    conf.Models.WorldModel.UseSoftPenalty = True
 
     conf.Models.Agent = CN()
     conf.Models.Agent.NumLayers = 0

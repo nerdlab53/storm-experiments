@@ -20,7 +20,7 @@ JointTrainAgent:
   TrainDynamicsEverySteps: 1
   TrainAgentEverySteps: 1
   UseDemonstration: False
-  SaveEverySteps: 2500
+  SaveEverySteps: 2000
 
 Models:
   WorldModel:
@@ -33,7 +33,7 @@ Models:
     UseProgressiveMasking: True
     UseProgressiveInKVCache: False
     UseMildDecayInKV: False
-    FixedMaskPercent: 0.25  # Change this for 0%, 5%, 15%, etc.
+    FixedMaskPercent: 0.0  # Change this for 0%, 5%, 15%, etc.
     UseRandomMask: False    # oldest-first masking  
     UseSoftPenalty: False    # soft penalties
 
