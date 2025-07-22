@@ -50,13 +50,19 @@ def build_vec_env(env_name, image_size, num_envs):
 
 
 def eval_episodes(num_episode, env_name, max_steps, num_envs, image_size,
-                  world_model: WorldModel, agent: agents.ActorCriticAgent):
+                  world_model: WorldModel, agent: agents.ActorCriticAgent, eval_seed=42):
     world_model.eval()
     agent.eval()
+    
+    # Set evaluation seed for reproducible episodes
     vec_env = build_vec_env(env_name, image_size, num_envs=num_envs)
+    
     print("Current env: " + colorama.Fore.YELLOW + f"{env_name}" + colorama.Style.RESET_ALL)
     sum_reward = np.zeros(num_envs)
-    current_obs, current_info = vec_env.reset()
+    
+    # Properly seed the vector environment
+    seeds = [eval_seed + i for i in range(num_envs)]
+    current_obs, current_info = vec_env.reset(seed=seeds)  # Seed each environment
     context_obs = deque(maxlen=16)
     context_action = deque(maxlen=16)
 
@@ -66,6 +72,8 @@ def eval_episodes(num_episode, env_name, max_steps, num_envs, image_size,
         # sample part >>>
         with torch.no_grad():
             if len(context_action) == 0:
+                # Use seeded random for initial actions
+                np.random.seed(eval_seed + len(final_rewards))
                 action = vec_env.action_space.sample()
             else:
                 context_latent = world_model.encode_obs(torch.cat(list(context_obs), dim=1))
@@ -74,7 +82,7 @@ def eval_episodes(num_episode, env_name, max_steps, num_envs, image_size,
                 prior_flattened_sample, last_dist_feat = world_model.calc_last_dist_feat(context_latent, model_context_action)
                 action = agent.sample_as_env_action(
                     torch.cat([prior_flattened_sample, last_dist_feat], dim=-1),
-                    greedy=False
+                    greedy=True  # Use deterministic sampling for reproducible results
                 )
 
         context_obs.append(rearrange(torch.Tensor(current_obs).cuda(), "B H W C -> B 1 C H W")/255)
@@ -113,6 +121,7 @@ if __name__ == "__main__":
     parser.add_argument("-config_path", type=str, required=True)
     parser.add_argument("-env_name", type=str, required=True)
     parser.add_argument("-run_name", type=str, required=True)
+    parser.add_argument("-eval_seed", type=int, default=42, help="Seed for evaluation episodes")
     args = parser.parse_args()
     conf = load_config(args.config_path)
     print(colorama.Fore.RED + str(args) + colorama.Style.RESET_ALL)
@@ -147,11 +156,12 @@ if __name__ == "__main__":
             max_steps=conf.JointTrainAgent.SampleMaxSteps,
             image_size=conf.BasicSettings.ImageSize,
             world_model=world_model,
-            agent=agent
+            agent=agent,
+            eval_seed=args.eval_seed  # Use command line seed
         )
         results.append([step, episode_avg_return])
     
-    os.mkdir('eval_result')
+    os.mkdir('eval_result', exist_ok=True)
     with open(f"eval_result/{args.run_name}.csv", "w") as fout:
         fout.write("step, episode_avg_return\n")
         for step, episode_avg_return in results:
