@@ -4,7 +4,7 @@
 echo "Starting training with 5% masking..."
 
 python -u train.py \
-    -n "pong-mask-5p-10k-seed42" \
+    -n "pong-mask-5p-50k-seed42" \
     -seed 42 \
     -config_path "config_files/STORM_5.yaml" \
     -env_name "ALE/Pong-v5" \
