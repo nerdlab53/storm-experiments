@@ -37,8 +37,8 @@ for model_key in "0p" "5p" "10p" "15p" "25p"; do
         
         # Run evaluation
         output=$(python -u eval.py \
-            -env_name "ALE/Pong-v5" \
-            -run_name "pong-mask-${model_key}-20k-seed42" \
+            -env_name "ALE/MsPacman-v5" \
+            -run_name "mspacman-mask-${model_key}-20k-seed42" \
             -config_path "config_files/STORM_${model_key}.yaml" \
             -eval_seed $seed 2>&1)
         
