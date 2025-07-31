@@ -4,7 +4,7 @@
 echo "Starting training with 25% masking..."
 
 python -u train.py \
-    -n "mspacman-mask-25p-100k-seed42" \
+    -n "mspacman-mask-25p-50k-seed42" \ 
     -seed 42 \
     -config_path "config_files/STORM_25.yaml" \
     -env_name "ALE/MsPacman-v5" \
