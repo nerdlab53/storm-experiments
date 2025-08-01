@@ -38,12 +38,12 @@ for model_key in "0p" "5p" "10p" "15p" "25p"; do
         # Run evaluation
         output=$(python -u eval.py \
             -env_name "ALE/MsPacman-v5" \
-            -run_name "mspacman-mask-${model_key}-20k-seed42" \
+            -run_name "mspacman-mask-${model_key}-50k-seed42" \
             -config_path "config_files/STORM_${model_key}.yaml" \
             -eval_seed $seed 2>&1)
         
         # Extract mean reward
-        mean_reward=$(echo "$output" | grep "Mean reward:" | tail -1 | awk '{print $4}')
+        mean_reward=$(echo "$output" | grep "Mean reward:" | tail -1 | awk '{print $3}')
         results+=($mean_reward)
         echo "    Mean reward: $mean_reward"
     done

@@ -140,10 +140,21 @@ if __name__ == "__main__":
 
     import glob
     pathes = glob.glob(f"{root_path}/world_model_*.pth")
+    if not pathes:
+        print(f"ERROR: No checkpoint files found in {root_path}/")
+        print(f"Looking for pattern: {root_path}/world_model_*.pth")
+        print("Available files in checkpoint directory:")
+        if os.path.exists(root_path):
+            for file in os.listdir(root_path):
+                print(f"  - {file}")
+        else:
+            print(f"  Checkpoint directory {root_path} does not exist!")
+        exit(1)
+    
     steps = [int(path.split("_")[-1].split(".")[0]) for path in pathes]
     steps.sort()
     steps = steps[-1:]
-    print(steps)
+    print(f"Found checkpoints for steps: {steps}")
     results = []
     for step in tqdm(steps):
         world_model.load_state_dict(torch.load(f"{root_path}/world_model_{step}.pth"))
@@ -161,7 +172,7 @@ if __name__ == "__main__":
         )
         results.append([step, episode_avg_return])
     
-    os.mkdir('eval_result', exist_ok=True)
+    os.makedirs('eval_result', exist_ok=True)
     with open(f"eval_result/{args.run_name}.csv", "w") as fout:
         fout.write("step, episode_avg_return\n")
         for step, episode_avg_return in results:
