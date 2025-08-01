@@ -6,10 +6,10 @@ BasicSettings:
   ReplayBufferOnGPU: True
 
 JointTrainAgent:
-  SampleMaxSteps: 50000
-  BufferMaxLength: 50000
+  SampleMaxSteps: 105000
+  BufferMaxLength: 100000
   BufferWarmUp: 1024  
-  NumEnvs: 1
+  NumEnvs: 1    
   BatchSize: 16
   DemonstrationBatchSize: 4
   BatchLength: 64
@@ -20,7 +20,7 @@ JointTrainAgent:
   TrainDynamicsEverySteps: 1
   TrainAgentEverySteps: 1
   UseDemonstration: False
-  SaveEverySteps: 5000
+  SaveEverySteps: 10000
 
 Models:
   WorldModel:
