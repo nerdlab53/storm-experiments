@@ -1,0 +1,156 @@
+SEQUENTIAL RANDOM TOKENS MASKING FOR 50K STEPS :   ============================================================
+STORM Models Multi-Seed Evaluation
+============================================================
+Models: 5 masking variants
+Seeds per model: 5
+Total evaluations: 25
+============================================================
+
+[1/5] Evaluating 0% Masking
+--------------------------------------------------
+  Run 1/5     Running evaluation (seed=1001)... Mean reward: 1333.5
+  Run 2/5     Running evaluation (seed=1002)... Mean reward: 1134.5
+  Run 3/5     Running evaluation (seed=1003)... Mean reward: 1370.5
+  Run 4/5     Running evaluation (seed=1004)... Mean reward: 1245.5
+  Run 5/5     Running evaluation (seed=1005)... Mean reward: 1252.0
+  ✅ Results: 1267.2 ± 91.3
+     95% CI: [1153.8, 1380.6]
+     Individual: [1333.5, 1134.5, 1370.5, 1245.5, 1252.0]
+
+[2/5] Evaluating 5% Masking
+--------------------------------------------------
+  Run 1/5     Running evaluation (seed=1001)... Mean reward: 1401.5
+  Run 2/5     Running evaluation (seed=1002)... Mean reward: 1662.0
+  Run 3/5     Running evaluation (seed=1003)... Mean reward: 1548.0
+  Run 4/5     Running evaluation (seed=1004)... Mean reward: 1704.5
+  Run 5/5     Running evaluation (seed=1005)... Mean reward: 1511.5
+  ✅ Results: 1565.5 ± 121.2
+     95% CI: [1415.0, 1716.0]
+     Individual: [1401.5, 1662.0, 1548.0, 1704.5, 1511.5]
+
+[3/5] Evaluating 10% Masking
+--------------------------------------------------
+  Run 1/5     Running evaluation (seed=1001)... Mean reward: 1288.5
+  Run 2/5     Running evaluation (seed=1002)... Mean reward: 1204.5
+  Run 3/5     Running evaluation (seed=1003)... Mean reward: 1056.5
+  Run 4/5     Running evaluation (seed=1004)... Mean reward: 1086.5
+  Run 5/5     Running evaluation (seed=1005)... Mean reward: 1075.0
+  ✅ Results: 1142.2 ± 100.3
+     95% CI: [1017.6, 1266.8]
+     Individual: [1288.5, 1204.5, 1056.5, 1086.5, 1075.0]
+
+[4/5] Evaluating 15% Masking
+--------------------------------------------------
+  Run 1/5     Running evaluation (seed=1001)... Mean reward: 965.5
+  Run 2/5     Running evaluation (seed=1002)... Mean reward: 849.5
+  Run 3/5     Running evaluation (seed=1003)... Mean reward: 932.5
+  Run 4/5     Running evaluation (seed=1004)... Mean reward: 1233.5
+  Run 5/5     Running evaluation (seed=1005)... Mean reward: 851.5
+  ✅ Results: 966.5 ± 157.6
+     95% CI: [770.8, 1162.2]
+     Individual: [965.5, 849.5, 932.5, 1233.5, 851.5]
+
+[5/5] Evaluating 25% Masking
+--------------------------------------------------
+  Run 1/5     Running evaluation (seed=1001)... Mean reward: 1333.5
+  Run 2/5     Running evaluation (seed=1002)... Mean reward: 1134.5
+  Run 3/5     Running evaluation (seed=1003)... Mean reward: 1370.5
+  Run 4/5     Running evaluation (seed=1004)... Mean reward: 1245.5
+  Run 5/5     Running evaluation (seed=1005)... Mean reward: 1252.0
+  ✅ Results: 1267.2 ± 91.3
+     95% CI: [1153.8, 1380.6]
+     Individual: [1333.5, 1134.5, 1370.5, 1245.5, 1252.0]
+
+================================================================================
+EVALUATION COMPLETE
+================================================================================
+📊 Detailed results saved to: eval_result/multi_seed_results_20250801_045558.json
+📈 Summary CSV saved to: eval_result/multi_seed_summary_20250801_045558.csv
+
+🏆 MODEL COMPARISON (Ranked by Mean Performance)
+================================================================================
+Rank Model           Mean±Std     95% CI               Runs  Individual Results
+--------------------------------------------------------------------------------
+1    5% Masking      1565.5±121.2 [1415.0, 1716.0]     5     1401.5, 1662.0, 1548.0, 1704.5, 1511.5
+2    0% Masking      1267.2±91.3  [1153.8, 1380.6]     5     1333.5, 1134.5, 1370.5, 1245.5, 1252.0
+3    25% Masking     1267.2±91.3  [1153.8, 1380.6]     5     1333.5, 1134.5, 1370.5, 1245.5, 1252.0
+4    10% Masking     1142.2±100.3 [1017.6, 1266.8]     5     1288.5, 1204.5, 1056.5, 1086.5, 1075.0
+5    15% Masking     966.5±157.6  [770.8, 1162.2]      5     965.5, 849.5, 932.5, 1233.5, 851.5
+
+📈 STATISTICAL ANALYSIS
+----------------------------------------
+🥇 Best performing: 5% Masking (1565.5 ± 121.2)
+📊 Significantly outperforms: 0% Masking, 25% Masking, 10% Masking, 15% Masking  
+SEQUENTIAL OLDEST TOKENS MASKING FOR 50K : 
+
+ ============================================================
+STORM Models Multi-Seed Evaluation
+============================================================
+Models: 4 masking variants
+Seeds per model: 5
+Total evaluations: 20
+============================================================
+
+[1/4] Evaluating 0% Masking
+--------------------------------------------------
+  Run 1/5     Running evaluation (seed=1001)... Mean reward: 1655.0
+  Run 2/5     Running evaluation (seed=1002)... Mean reward: 1661.0
+  Run 3/5     Running evaluation (seed=1003)... Mean reward: 1666.5
+  Run 4/5     Running evaluation (seed=1004)... Mean reward: 1756.0
+  Run 5/5     Running evaluation (seed=1005)... Mean reward: 1668.5
+  ✅ Results: 1681.4 ± 42.0
+     95% CI: [1629.2, 1733.6]
+     Individual: [1655.0, 1661.0, 1666.5, 1756.0, 1668.5]
+
+[2/4] Evaluating 5% Masking
+--------------------------------------------------
+  Run 1/5     Running evaluation (seed=1001)... Mean reward: 1715.5
+  Run 2/5     Running evaluation (seed=1002)... Mean reward: 1695.0
+  Run 3/5     Running evaluation (seed=1003)... Mean reward: 1703.5
+  Run 4/5     Running evaluation (seed=1004)... Mean reward: 1602.0
+  Run 5/5     Running evaluation (seed=1005)... Mean reward: 1847.5
+  ✅ Results: 1712.7 ± 87.8
+     95% CI: [1603.7, 1821.7]
+     Individual: [1715.5, 1695.0, 1703.5, 1602.0, 1847.5]
+
+[3/4] Evaluating 10% Masking
+--------------------------------------------------
+  Run 1/5     Running evaluation (seed=1001)... Mean reward: 1991.0
+  Run 2/5     Running evaluation (seed=1002)... Mean reward: 1732.5
+  Run 3/5     Running evaluation (seed=1003)... Mean reward: 2221.0
+  Run 4/5     Running evaluation (seed=1004)... Mean reward: 1898.0
+  Run 5/5     Running evaluation (seed=1005)... Mean reward: 1405.5
+  ✅ Results: 1849.6 ± 304.6
+     95% CI: [1471.3, 2227.9]
+     Individual: [1991.0, 1732.5, 2221.0, 1898.0, 1405.5]
+
+[4/4] Evaluating 15% Masking
+--------------------------------------------------
+  Run 1/5     Running evaluation (seed=1001)... Mean reward: 1669.5
+  Run 2/5     Running evaluation (seed=1002)... Mean reward: 1878.5
+  Run 3/5     Running evaluation (seed=1003)... Mean reward: 1821.0
+  Run 4/5     Running evaluation (seed=1004)... Mean reward: 1876.5
+  Run 5/5     Running evaluation (seed=1005)... Mean reward: 1899.0
+  ✅ Results: 1828.9 ± 93.7
+     95% CI: [1712.6, 1945.2]
+     Individual: [1669.5, 1878.5, 1821.0, 1876.5, 1899.0]
+
+================================================================================
+EVALUATION COMPLETE
+================================================================================
+📊 Detailed results saved to: eval_result/multi_seed_results_20250804_152142.json
+📈 Summary CSV saved to: eval_result/multi_seed_summary_20250804_152142.csv
+
+🏆 MODEL COMPARISON (Ranked by Mean Performance)
+================================================================================
+Rank Model           Mean±Std     95% CI               Runs  Individual Results
+--------------------------------------------------------------------------------
+1    10% Masking     1849.6±304.6 [1471.3, 2227.9]     5     1991.0, 1732.5, 2221.0, 1898.0, 1405.5
+2    15% Masking     1828.9±93.7  [1712.6, 1945.2]     5     1669.5, 1878.5, 1821.0, 1876.5, 1899.0
+3    5% Masking      1712.7±87.8  [1603.7, 1821.7]     5     1715.5, 1695.0, 1703.5, 1602.0, 1847.5
+4    0% Masking      1681.4±42.0  [1629.2, 1733.6]     5     1655.0, 1661.0, 1666.5, 1756.0, 1668.5
+
+📈 STATISTICAL ANALYSIS
+----------------------------------------
+🥇 Best performing: 10% Masking (1849.6 ± 304.6)
+📊 No statistically significant differences detected (overlapping 95% CIs)
