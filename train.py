@@ -255,6 +255,7 @@ def build_world_model(conf, action_dim):
         use_progressive_in_kv=getattr(conf.Models.WorldModel, 'UseProgressiveInKVCache', False),
         use_mild_decay_in_kv=getattr(conf.Models.WorldModel, 'UseMildDecayInKV', False),
         fixed_mask_percent=getattr(conf.Models.WorldModel, 'FixedMaskPercent', 0.0),
+        fixed_mask_percents=getattr(conf.Models.WorldModel, 'FixedMaskPercents', None),
         use_random_mask=getattr(conf.Models.WorldModel, 'UseRandomMask', False),
         use_soft_penalty=getattr(conf.Models.WorldModel, 'UseSoftPenalty', True)
     ))

@@ -72,6 +72,28 @@ def get_fixed_mask_causal(batch_length, mask_percent, flag, soft, device, soft_p
     return mask
 
 
+def get_per_head_fixed_mask_causal(batch_length, mask_percents, flag, soft, device, soft_penalty=-1.0):
+    num_heads = len(mask_percents)
+    mask = torch.full((1, num_heads, batch_length, batch_length), float('-inf'), device=device)
+    for h in range(num_heads):
+        indices = torch.tril_indices(batch_length, batch_length, offset=0, device=device)
+        mask[0, h, indices[0], indices[1]] = 0.0
+        
+        for i in range(1, batch_length):
+            idx = torch.arange(0, i, device=device)
+            num_tokens = min(int(len(idx) * mask_percents[h]), len(idx))
+            if num_tokens > 0:
+                if not flag:
+                    to_mask = idx[:num_tokens]
+                else:
+                    to_mask = idx[torch.randperm(len(idx), device=device)[:num_tokens]]
+                if soft:
+                    mask[0, h, i, to_mask] = soft_penalty
+                else:
+                    mask[0, h, i, to_mask] = float('-inf')
+    return mask
+
+
 class ScaledDotProductAttention(nn.Module):
     ''' Scaled Dot-Product Attention '''
 
@@ -206,7 +228,10 @@ class MultiHeadAttentionProgressive(nn.Module):
         q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
 
         if mask is not None:
-            mask = mask.unsqueeze(1)   # For head axis broadcasting.
+            if mask.dim() == 4 and mask.shape[1] == n_head:
+                pass  # already per-head
+            else:
+                mask = mask.unsqueeze(1)   # For head axis broadcasting.
 
         # Choose appropriate attention mechanism based on mask type
         if self._is_progressive_mask(mask):

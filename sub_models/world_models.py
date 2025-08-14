@@ -7,7 +7,7 @@ from einops.layers.torch import Rearrange
 from torch.cuda.amp import autocast
 
 from sub_models.functions_losses import SymLogTwoHotLoss
-from sub_models.attention_blocks import get_subsequent_mask_with_batch_length, get_subsequent_mask, get_fixed_mask_causal
+from sub_models.attention_blocks import get_subsequent_mask_with_batch_length, get_subsequent_mask, get_fixed_mask_causal, get_per_head_fixed_mask_causal
 from sub_models.transformer_model import StochasticTransformerKVCacheProgressive
 from device_utils import get_device, get_device_type, get_autocast_dtype, is_autocast_enabled, move_to_device, DEVICE, DEVICE_TYPE, AUTOCAST_ENABLED, AUTOCAST_DTYPE
 import agents
@@ -227,7 +227,8 @@ class WorldModel(nn.Module):
     def __init__(self, in_channels, action_dim,
                  transformer_max_length, transformer_hidden_dim, transformer_num_layers, transformer_num_heads,
                  use_progressive_masking=True, use_progressive_in_kv=False, use_mild_decay_in_kv=False,
-                 fixed_mask_percent=0.0, use_random_mask=False, use_soft_penalty=True):
+                 fixed_mask_percent=0.0, fixed_mask_percents=None, use_random_mask=False, use_soft_penalty=True,
+                 use_statemask=False, statemask_percents=None):  # Add new params for StateMask
         super().__init__()
         self.transformer_hidden_dim = transformer_hidden_dim
         self.final_feature_width = 4
@@ -242,11 +243,27 @@ class WorldModel(nn.Module):
         self.use_progressive_masking = use_progressive_masking  # Add this parameter
         self.use_progressive_in_kv = use_progressive_in_kv
         self.use_mild_decay_in_kv = use_mild_decay_in_kv
+        self.num_heads = transformer_num_heads
         
         # Fixed masking parameters
-        self.fixed_mask_percent = fixed_mask_percent
+        self.fixed_mask_percents = fixed_mask_percents if fixed_mask_percents is not None else [fixed_mask_percent] * self.num_heads
+        
+        # Validate masking percentages
+        if len(self.fixed_mask_percents) != self.num_heads:
+            raise ValueError(f"FixedMaskPercents must have exactly {self.num_heads} values, got {len(self.fixed_mask_percents)}")
+        
+        for i, percent in enumerate(self.fixed_mask_percents):
+            if not (0.0 <= percent <= 1.0):
+                raise ValueError(f"FixedMaskPercents[{i}] = {percent} must be between 0.0 and 1.0")
+        
+        print(f"Attention head masking configured: {self.fixed_mask_percents}")
+        
         self.use_random_mask = use_random_mask
         self.use_soft_penalty = use_soft_penalty
+        self.use_statemask = use_statemask
+        if self.use_statemask:
+            from sub_models.statemask import StateMask  # Import new module
+            self.statemask = StateMask(transformer_hidden_dim, transformer_num_heads)
 
         self.encoder = EncoderBN(
             in_channels=in_channels,
@@ -316,15 +333,19 @@ class WorldModel(nn.Module):
         with torch.autocast(device_type=self.device_type, dtype=self.tensor_dtype, enabled=self.use_amp):
             if progressive_mask:
                 # Use the new fixed masking function
-                temporal_mask = get_fixed_mask_causal(
+                temporal_mask = get_per_head_fixed_mask_causal(
                     batch_length=latent.shape[1], 
-                    mask_percent=self.fixed_mask_percent,
+                    mask_percents=self.fixed_mask_percents,
                     flag=self.use_random_mask,
                     soft=self.use_soft_penalty,
                     device=latent.device
                 )
             else:
                 temporal_mask = get_subsequent_mask(latent)
+            if self.use_statemask:
+                statemask = self.statemask(latent)  # Generate StateMask
+                # Combine: multiply masks (assuming soft masks)
+                temporal_mask = temporal_mask * statemask.mean(dim=1, keepdim=True)  # Simple combination, average over heads for minimal change
             dist_feat = self.storm_transformer(latent, action, temporal_mask)
             last_dist_feat = dist_feat[:, -1:]
             prior_logits = self.dist_head.forward_prior(last_dist_feat)
@@ -438,9 +459,9 @@ class WorldModel(nn.Module):
 
             # transformer
             if progressive_mask:
-                temporal_mask = get_fixed_mask_causal(
+                temporal_mask = get_per_head_fixed_mask_causal(
                     batch_length=batch_length,
-                    mask_percent=self.fixed_mask_percent,
+                    mask_percents=self.fixed_mask_percents,
                     flag=self.use_random_mask,
                     soft=self.use_soft_penalty,
                     device=flattened_sample.device

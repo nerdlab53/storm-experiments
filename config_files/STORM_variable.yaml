@@ -1,0 +1,70 @@
+Task: "JointTrainAgent"
+
+BasicSettings:
+  Seed: 0
+  ImageSize: 64
+  ReplayBufferOnGPU: True
+
+JointTrainAgent:
+  SampleMaxSteps: 105000
+  BufferMaxLength: 100000
+  BufferWarmUp: 1024
+  NumEnvs: 1
+  BatchSize: 16
+  DemonstrationBatchSize: 4
+  BatchLength: 64
+  ImagineBatchSize: 1024
+  ImagineDemonstrationBatchSize: 256
+  ImagineContextLength: 8
+  ImagineBatchLength: 16
+  TrainDynamicsEverySteps: 1
+  TrainAgentEverySteps: 1
+  UseDemonstration: False
+  SaveEverySteps: 10000
+
+Models:
+  WorldModel:
+    InChannels: 3
+    TransformerMaxLength: 64
+    TransformerHiddenDim: 512
+    TransformerNumLayers: 2
+    TransformerNumHeads: 8
+    # progressive masking
+    UseProgressiveMasking: True
+    UseProgressiveInKVCache: False
+    UseMildDecayInKV: False
+    FixedMaskPercents: [0.02, 0.04, 0.06, 0.08, 0.10, 0.12, 0.14, 0.16]  # Different percentages per head
+    UseRandomMask: False    # oldest-first masking  
+    UseSoftPenalty: False    # soft penalties
+    UseStateMask: False     # Enable StateMask integration
+    # StateMask no longer uses per-head percentages; attention head percentages remain above
+
+  Agent:
+    NumLayers: 2
+    HiddenDim: 512
+    Gamma: 0.985
+    Lambda: 0.95
+    EntropyCoef: 3E-4
+
+  NoveltyDetection:
+    Enabled: True
+    HistoryLength: 100
+    DetectionThresholdPercentile: 95.0
+    MinSamplesForDetection: 50
+    EnableAdaptiveThreshold: True
+    EIGThreshold: 0.0  # Primary detection: negative EIG indicates non-learnable data
+    UseEIGPrimary: True  # Use simplified EIG-based approach as primary method
+    LogDetections: True
+    SaveDetectionLog: True
+    DetectionLogPath: "detection_logs/"
+
+NoveltyTesting:
+  Enabled: False
+  NoveltyType: "visual_noise"  # visual_noise, color_shift, partial_invisibility, blur, rotation
+  NoveltyParams:
+    noise_std: 30.0  # for visual_noise
+    shift_type: "red"  # for color_shift: red, blue, grayscale, invert
+    mask_ratio: 0.3  # for partial_invisibility
+    kernel_size: 15  # for blur
+    angle: 15.0  # for rotation
+  NoveltyStartStep: 100

@@ -64,6 +64,10 @@ def evaluate_all_models():
     """Evaluate all models with multiple seeds."""
     
     models = {
+        "0p" : "0% Masking",
+        "5p" : "5% Masking",
+        "10p" : "10% Masking",
+        "15p" : "15% Masking",
         "25p": "25% Masking"
     }
     

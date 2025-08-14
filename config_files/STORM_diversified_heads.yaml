@@ -1,0 +1,78 @@
+Task: "JointTrainAgent"
+
+BasicSettings:
+  Seed: 0
+  ImageSize: 64
+  ReplayBufferOnGPU: True
+
+JointTrainAgent:
+  SampleMaxSteps: 105000
+  BufferMaxLength: 100000
+  BufferWarmUp: 1024
+  NumEnvs: 1
+  BatchSize: 16
+  DemonstrationBatchSize: 4
+  BatchLength: 64
+  ImagineBatchSize: 1024
+  ImagineDemonstrationBatchSize: 256
+  ImagineContextLength: 8
+  ImagineBatchLength: 16
+  TrainDynamicsEverySteps: 1
+  TrainAgentEverySteps: 1
+  UseDemonstration: False
+  SaveEverySteps: 10000
+
+Models:
+  WorldModel:
+    InChannels: 3
+    TransformerMaxLength: 64
+    TransformerHiddenDim: 512
+    TransformerNumLayers: 2
+    TransformerNumHeads: 8
+    # Diversified attention head masking for different game dynamics
+    UseProgressiveMasking: True
+    UseProgressiveInKVCache: False
+    UseMildDecayInKV: False
+    # Progressive masking strategy: each head learns different temporal patterns
+    # Head 1 (0%): Global patterns & long-term strategy
+    # Head 2 (5%): Near-complete context with slight constraints  
+    # Head 3 (10%): Recent-biased patterns
+    # Head 4 (15%): Medium-term temporal relationships
+    # Head 5 (20%): Local context patterns
+    # Head 6 (25%): Action-consequence learning
+    # Head 7 (30%): Reactive pattern detection
+    # Head 8 (35%): Immediate response patterns
+    FixedMaskPercents: [0.0, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35]
+    UseRandomMask: False    # Use oldest-first masking for consistent learning
+    UseSoftPenalty: False   # Hard masking for clear differentiation
+    UseStateMask: False     # Disable StateMask to focus on temporal masking
+
+  Agent:
+    NumLayers: 2
+    HiddenDim: 512
+    Gamma: 0.985
+    Lambda: 0.95
+    EntropyCoef: 3E-4
+
+  NoveltyDetection:
+    Enabled: True
+    HistoryLength: 100
+    DetectionThresholdPercentile: 95.0
+    MinSamplesForDetection: 50
+    EnableAdaptiveThreshold: True
+    EIGThreshold: 0.0
+    UseEIGPrimary: True
+    LogDetections: True
+    SaveDetectionLog: True
+    DetectionLogPath: "detection_logs/"
+
+NoveltyTesting:
+  Enabled: False
+  NoveltyType: "visual_noise"
+  NoveltyParams:
+    noise_std: 30.0
+    shift_type: "red"
+    mask_ratio: 0.3
+    kernel_size: 15
+    angle: 15.0
+  NoveltyStartStep: 100

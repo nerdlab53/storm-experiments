@@ -81,6 +81,7 @@ def load_config(config_path):
     conf.Models.WorldModel.UseProgressiveInKVCache = False
     conf.Models.WorldModel.UseMildDecayInKV = False
     conf.Models.WorldModel.FixedMaskPercent = 0.0
+    conf.Models.WorldModel.FixedMaskPercents = None
     conf.Models.WorldModel.UseRandomMask = False
     conf.Models.WorldModel.UseSoftPenalty = True
 
