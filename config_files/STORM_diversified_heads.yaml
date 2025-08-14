@@ -36,7 +36,7 @@ Models:
     FixedMaskPercents: [0.0, 0.10, 0.25, 0.40, 0.55, 0.70, 0.85, 0.95]
     UseRandomMask: False    # Use oldest-first masking for consistent learning
     UseSoftPenalty: False   # Hard masking for clear differentiation
-    UseStateMask: False     # Disable StateMask to focus on temporal masking
+
 
   Agent:
     NumLayers: 2

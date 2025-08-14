@@ -33,12 +33,7 @@ Models:
     UseProgressiveMasking: True
     UseProgressiveInKVCache: False
     UseMildDecayInKV: False
-    # Functional specialization strategy:
-    # Heads 1-2 (0%, 8%): Strategic planning & global patterns
-    # Heads 3-4 (15%, 8%): Medium-term tactical decisions  
-    # Heads 5-6 (25%, 15%): Short-term action selection
-    # Heads 7-8 (35%, 25%): Immediate reflexive responses
-    FixedMaskPercents: [0.0, 0.08, 0.15, 0.08, 0.25, 0.15, 0.35, 0.25]
+    FixedMaskPercents: [0.0, 0.10, 0.25, 0.40, 0.55, 0.70, 0.85, 0.95]
     UseRandomMask: False    # Consistent oldest-first masking
     UseSoftPenalty: False   # Hard boundaries for clear specialization
 
