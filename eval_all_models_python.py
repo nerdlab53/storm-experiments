@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import subprocess
 import numpy as np
 import pandas as pd
@@ -10,23 +8,32 @@ from datetime import datetime
 import sys
 from typing import Dict, List, Tuple
 
-def run_single_evaluation(model_key: str, seed: int) -> float:
+def run_single_evaluation(model_key: str, seed: int, env_name: str = "ALE/MsPacman-v5") -> float:
     """Run a single evaluation and return the mean reward."""
-    run_name = f"mspacman-mask-{model_key}-50k-seed42"
     
-    # Map model keys to config file numbers
-    config_mapping = {
-        "0p": "0",
-        "5p": "5", 
-        "10p": "10",
-        "15p": "15",
-        "25p": "25"
-    }
-    config_path = f"config_files/STORM_{config_mapping[model_key]}.yaml"
+    # Determine environment short name for run naming
+    env_short = "mspacman" if "MsPacman" in env_name else "pong" if "Pong" in env_name else "breakout"
+    
+    # Handle different model types
+    if model_key in ["diversified", "specialized"]:
+        # New heads experiment models - always use seed 42 for run name (training seed)
+        run_name = f"{env_short}-{model_key}-sequential-50k-seed42"
+        config_path = f"config_files/STORM_{model_key}_heads.yaml"
+    else:
+        # Original masking percentage models
+        run_name = f"{env_short}-mask-{model_key}-50k-seed42"
+        config_mapping = {
+            "0p": "0",
+            "5p": "5", 
+            "10p": "10",
+            "15p": "15",
+            "25p": "25"
+        }
+        config_path = f"config_files/STORM_{config_mapping[model_key]}.yaml"
     
     cmd = [
         "python", "-u", "eval.py",
-        "-env_name", "ALE/MsPacman-v5", 
+        "-env_name", env_name, 
         "-run_name", run_name,
         "-config_path", config_path,
         "-eval_seed", str(seed)
@@ -60,9 +67,10 @@ def run_single_evaluation(model_key: str, seed: int) -> float:
         print(f"ERROR: {str(e)}")
         return np.nan
 
-def evaluate_all_models():
+def evaluate_all_models(env_name: str = "ALE/MsPacman-v5", include_heads_experiments: bool = True):
     """Evaluate all models with multiple seeds."""
     
+    # Original masking percentage models
     models = {
         "0p" : "0% Masking",
         "5p" : "5% Masking",
@@ -71,13 +79,21 @@ def evaluate_all_models():
         "25p": "25% Masking"
     }
     
+    # Add heads experiments if requested
+    if include_heads_experiments:
+        models.update({
+            "diversified": "Diversified Heads",
+            "specialized": "Specialized Heads"
+        })
+    
     seeds = [1001, 1002, 1003, 1004, 1005]
     num_runs = len(seeds)
     
     print("="*60)
     print("STORM Models Multi-Seed Evaluation")
     print("="*60)
-    print(f"Models: {len(models)} masking variants")
+    print(f"Environment: {env_name}")
+    print(f"Models: {len(models)} variants")
     print(f"Seeds per model: {num_runs}")
     print(f"Total evaluations: {len(models) * num_runs}")
     print("="*60)
@@ -92,7 +108,15 @@ def evaluate_all_models():
         print("-" * 50)
         
         # Check if model exists
-        checkpoint_dir = f"ckpt/mspacman-mask-{model_key}-50k-seed42"
+        env_short = "mspacman" if "MsPacman" in env_name else "pong" if "Pong" in env_name else "breakout"
+        
+        if model_key in ["diversified", "specialized"]:
+            # Use seed 42 for heads experiments (default training seed)
+            checkpoint_dir = f"ckpt/{env_short}-{model_key}-sequential-50k-seed42"
+        else:
+            # Original masking models
+            checkpoint_dir = f"ckpt/{env_short}-mask-{model_key}-50k-seed42"
+            
         if not os.path.exists(checkpoint_dir):
             print(f"❌ ERROR: Checkpoint directory not found: {checkpoint_dir}")
             print("   Skipping this model...")
@@ -103,7 +127,102 @@ def evaluate_all_models():
         
         for j, seed in enumerate(seeds, 1):
             print(f"  Run {j}/{num_runs} ", end="")
-            reward = run_single_evaluation(model_key, seed)
+            reward = run_single_evaluation(model_key, seed, env_name)
+            
+            if not np.isnan(reward):
+                model_rewards.append(reward)
+            else:
+                print(f"    ⚠️ Failed to get reward for seed {seed}")
+        
+        if len(model_rewards) > 0:
+            # Calculate statistics
+            mean_reward = np.mean(model_rewards)
+            std_reward = np.std(model_rewards, ddof=1) if len(model_rewards) > 1 else 0.0
+            
+            # Calculate 95% confidence interval 
+            if len(model_rewards) > 1:
+                from scipy import stats
+                confidence = 0.95
+                t_score = stats.t.ppf((1 + confidence) / 2, len(model_rewards) - 1)
+                stderr = std_reward / np.sqrt(len(model_rewards))
+                margin_error = t_score * stderr
+                ci_lower = mean_reward - margin_error
+                ci_upper = mean_reward + margin_error
+            else:
+                ci_lower = ci_upper = mean_reward
+            
+            results[model_key] = {
+                'name': model_name,
+                'mean': mean_reward,
+                'std': std_reward,
+                'ci_lower': ci_lower,
+                'ci_upper': ci_upper,
+                'count': len(model_rewards),
+                'rewards': model_rewards
+            }
+            
+            print(f"  ✅ Results: {mean_reward:.1f} ± {std_reward:.1f}")
+            print(f"     95% CI: [{ci_lower:.1f}, {ci_upper:.1f}]")
+            print(f"     Individual: {model_rewards}")
+        else:
+            print(f"  ❌ No successful evaluations for {model_name}")
+            results[model_key] = {
+                'name': model_name,
+                'mean': np.nan,
+                'std': np.nan,
+                'ci_lower': np.nan,
+                'ci_upper': np.nan,
+                'count': 0,
+                'rewards': []
+            }
+        
+        print()
+    
+    return results
+
+def evaluate_heads_only(env_name: str = "ALE/MsPacman-v5"):
+    """Evaluate only heads experiments (diversified and specialized)."""
+    
+    models = {
+        "diversified": "Diversified Heads",
+        "specialized": "Specialized Heads"
+    }
+    
+    seeds = [1001, 1002, 1003, 1004, 1005]
+    num_runs = len(seeds)
+    
+    print("="*60)
+    print("STORM Heads Experiments Evaluation")
+    print("="*60)
+    print(f"Environment: {env_name}")
+    print(f"Models: {len(models)} heads variants")
+    print(f"Seeds per model: {num_runs}")
+    print(f"Total evaluations: {len(models) * num_runs}")
+    print("="*60)
+    print()
+    
+    # Store all results
+    results = {}
+    
+    for i, (model_key, model_name) in enumerate(models.items(), 1):
+        print(f"[{i}/{len(models)}] Evaluating {model_name}")
+        print("-" * 50)
+        
+        # Check if model exists
+        env_short = "mspacman" if "MsPacman" in env_name else "pong" if "Pong" in env_name else "breakout"
+        checkpoint_dir = f"ckpt/{env_short}-{model_key}-sequential-50k-seed42"
+            
+        if not os.path.exists(checkpoint_dir):
+            print(f"❌ ERROR: Checkpoint directory not found: {checkpoint_dir}")
+            print("   Skipping this model...")
+            print()
+            continue
+        
+        model_rewards = []
+        
+        for j, seed in enumerate(seeds, 1):
+            print(f"  Run {j}/{num_runs} ", end="")
+            reward = run_single_evaluation(model_key, seed, env_name)
             
             if not np.isnan(reward):
                 model_rewards.append(reward)
@@ -258,12 +377,54 @@ def save_and_display_results(results: Dict):
             print("📊 No statistically significant differences detected (overlapping 95% CIs)")
 
 def main():
-    """Main function."""
+    """Main function with command line support."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description="Evaluate STORM models with multiple seeds",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Evaluate all models (including heads experiments) on MsPacman
+  python eval_all_models_python.py --env_name ALE/MsPacman-v5
+  
+  # Evaluate only original masking models on Pong
+  python eval_all_models_python.py --env_name ALE/Pong-v5 --no_heads_experiments
+  
+  # Evaluate only heads experiments on MsPacman
+  python eval_all_models_python.py --env_name ALE/MsPacman-v5 --heads_only
+        """
+    )
+    
+    parser.add_argument("--env_name", type=str, default="ALE/MsPacman-v5",
+                       help="Environment name (default: ALE/MsPacman-v5)")
+    
+    parser.add_argument("--no_heads_experiments", action="store_true",
+                       help="Exclude diversified and specialized heads experiments")
+    
+    parser.add_argument("--heads_only", action="store_true",
+                       help="Evaluate only heads experiments (diversified and specialized)")
+    
+    args = parser.parse_args()
+    
+    # Validate arguments
+    if args.no_heads_experiments and args.heads_only:
+        print("❌ Error: Cannot use both --no_heads_experiments and --heads_only")
+        sys.exit(1)
+    
     print("Starting comprehensive model evaluation...")
+    print(f"Environment: {args.env_name}")
     print()
     
     try:
-        results = evaluate_all_models()
+        if args.heads_only:
+            # Evaluate only heads experiments
+            results = evaluate_heads_only(args.env_name)
+        else:
+            # Evaluate all models
+            include_heads = not args.no_heads_experiments
+            results = evaluate_all_models(args.env_name, include_heads)
+            
         save_and_display_results(results)
         
     except KeyboardInterrupt:
