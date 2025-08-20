@@ -2,37 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
-class StateMask(nn.Module):
-    """Latent-level soft masks per attention head (decoupled from percentages).
-
-    Generates per-head masks for latent features. Kept for potential use in
-    latent masking experiments, separate from attention masking and action
-    blinding. Does not encode any fixed sparsity percentages.
-    """
-
-    def __init__(self, input_dim: int, num_heads: int):
-        super().__init__()
-        self.num_heads = num_heads
-        self.mask_generators = nn.ModuleList([
-            nn.Linear(input_dim, input_dim) for _ in range(num_heads)
-        ])
-        self.sparsity_loss_weight = 1.0
-
-    def forward(self, latent: torch.Tensor) -> torch.Tensor:
-        masks = []
-        for head_idx in range(self.num_heads):
-            mask_logits = self.mask_generators[head_idx](latent)
-            mask = torch.sigmoid(mask_logits)
-            masks.append(mask)
-        return torch.stack(masks, dim=1)  # [B, num_heads, L, D]
-
-    def compute_loss(self, original_pred: torch.Tensor, masked_pred: torch.Tensor, masks: torch.Tensor) -> torch.Tensor:
-        fidelity_loss = F.mse_loss(masked_pred, original_pred)
-        sparsity_loss = torch.mean(masks)
-        return fidelity_loss + self.sparsity_loss_weight * sparsity_loss
-
-
 class StateMaskGate(nn.Module):
     """Time-step action blinding gate (paper-aligned StateMask integration).
 

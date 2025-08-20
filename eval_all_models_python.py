@@ -19,6 +19,10 @@ def run_single_evaluation(model_key: str, seed: int, env_name: str = "ALE/MsPacm
         # New heads experiment models - always use seed 42 for run name (training seed)
         run_name = f"{env_short}-{model_key}-sequential-50k-seed42"
         config_path = f"config_files/STORM_{model_key}_heads.yaml"
+    elif model_key == "masked-conservative":
+        # Conservative masking experiment
+        run_name = f"{env_short}-conservative-sequential-50k-seed42"
+        config_path = "config_files/STORM_masked_conservative.yaml"
     else:
         # Original masking percentage models
         run_name = f"{env_short}-mask-{model_key}-50k-seed42"
@@ -83,7 +87,8 @@ def evaluate_all_models(env_name: str = "ALE/MsPacman-v5", include_heads_experim
     if include_heads_experiments:
         models.update({
             "diversified": "Diversified Heads",
-            "specialized": "Specialized Heads"
+            "specialized": "Specialized Heads",
+            "masked-conservative": "Conservative Masking"
         })
     
     seeds = [1001, 1002, 1003, 1004, 1005]
@@ -113,6 +118,9 @@ def evaluate_all_models(env_name: str = "ALE/MsPacman-v5", include_heads_experim
         if model_key in ["diversified", "specialized"]:
             # Use seed 42 for heads experiments (default training seed)
             checkpoint_dir = f"ckpt/{env_short}-{model_key}-sequential-50k-seed42"
+        elif model_key == "masked-conservative":
+            # Conservative masking experiment
+            checkpoint_dir = f"ckpt/{env_short}-conservative-sequential-50k-seed42"
         else:
             # Original masking models
             checkpoint_dir = f"ckpt/{env_short}-mask-{model_key}-50k-seed42"

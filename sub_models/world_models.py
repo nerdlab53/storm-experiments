@@ -404,7 +404,7 @@ class WorldModel(nn.Module):
             self.termination_hat_buffer = torch.zeros(scalar_size, dtype=dtype, device=self.device)
 
     def imagine_data(self, agent: agents.ActorCriticAgent, sample_obs, sample_action,
-                     imagine_batch_size, imagine_batch_length, log_video, logger):
+                     imagine_batch_size, imagine_batch_length, log_video, logger, statemask=None):
         self.init_imagine_buffer(imagine_batch_size, imagine_batch_length, dtype=self.tensor_dtype)
         obs_hat_list = []
 
@@ -422,7 +422,8 @@ class WorldModel(nn.Module):
 
         # imagine
         for i in range(imagine_batch_length):
-            action = agent.sample(torch.cat([self.latent_buffer[:, i:i+1], self.hidden_buffer[:, i:i+1]], dim=-1))
+            current_state = torch.cat([self.latent_buffer[:, i:i+1], self.hidden_buffer[:, i:i+1]], dim=-1)
+            action = agent.sample(current_state, statemask=statemask)
             self.action_buffer[:, i:i+1] = action
 
             last_obs_hat, last_reward_hat, last_termination_hat, last_latent, last_dist_feat = self.predict_next(

@@ -1,0 +1,71 @@
+Task: "JointTrainAgent"
+
+BasicSettings:
+  Seed: 0
+  ImageSize: 64
+  ReplayBufferOnGPU: True
+
+JointTrainAgent:
+  SampleMaxSteps: 52000
+  BufferMaxLength: 50000
+  BufferWarmUp: 1024
+  NumEnvs: 1
+  BatchSize: 16
+  DemonstrationBatchSize: 4
+  BatchLength: 64
+  ImagineBatchSize: 1024
+  ImagineDemonstrationBatchSize: 256
+  ImagineContextLength: 8
+  ImagineBatchLength: 16
+  TrainDynamicsEverySteps: 1
+  TrainAgentEverySteps: 1
+  UseDemonstration: False
+  SaveEverySteps: 2000
+
+Models:
+  WorldModel:
+    InChannels: 3
+    TransformerMaxLength: 64
+    TransformerHiddenDim: 512
+    TransformerNumLayers: 2
+    TransformerNumHeads: 8
+    # Monotonic increasing masking: testing if narrower range (0-25%) shows different behavior
+    UseProgressiveMasking: True
+    UseProgressiveInKVCache: False
+    UseMildDecayInKV: False
+    # Monotonic increasing strategy (0% to 25% evenly distributed):
+    # Head 1: 0%      - Full context access
+    # Head 2: 3.57%   - Near-full context  
+    # Head 3: 7.14%   - Slight temporal focus
+    # Head 4: 10.71%  - Light masking
+    # Head 5: 14.29%  - Light-moderate masking
+    # Head 6: 17.86%  - Moderate masking
+    # Head 7: 21.43%  - Medium masking
+    # Head 8: 25%     - Maximum masking for this range
+    FixedMaskPercents: [0.0, 0.0357, 0.0714, 0.1071, 0.1429, 0.1786, 0.2143, 0.25]
+    UseRandomMask: False    # Consistent oldest-first masking (same as specialized)
+    UseSoftPenalty: False   # Hard boundaries (same as specialized)
+
+
+  Agent:
+    NumLayers: 2
+    HiddenDim: 512
+    Gamma: 0.985
+    Lambda: 0.95
+    EntropyCoef: 3E-4
+
+  NoveltyDetection:
+    Enabled: True
+    HistoryLength: 100
+    DetectionThresholdPercentile: 95.0
+    MinSamplesForDetection: 50
+    EnableAdaptiveThreshold: True
+    EIGThreshold: 0.0
+    UseEIGPrimary: True
+    LogDetections: True
+    SaveDetectionLog: True
+    DetectionLogPath: "detection_logs/"
+
+NoveltyTesting:
+  Enabled: False
+  NoveltyType: "visual_noise"

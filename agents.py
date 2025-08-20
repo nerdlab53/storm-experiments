@@ -111,7 +111,7 @@ class ActorCriticAgent(nn.Module):
         return logits, raw_value
 
     @torch.no_grad()
-    def sample(self, latent, greedy=False):
+    def sample(self, latent, greedy=False, statemask=None):
         self.eval()
         with torch.autocast(device_type='cuda', dtype=torch.bfloat16, enabled=self.use_amp):
             logits = self.policy(latent)
@@ -120,10 +120,22 @@ class ActorCriticAgent(nn.Module):
                 action = dist.probs.argmax(dim=-1)
             else:
                 action = dist.sample()
+            
+            # Apply StateMask blinding if provided
+            if statemask is not None:
+                gate_prob = statemask(latent)  # [B, 1]
+                mask = torch.bernoulli(gate_prob).squeeze(-1)  # [B]
+                
+                # Generate random actions for blinding
+                random_action = torch.randint_like(action, 0, logits.shape[-1])
+                
+                # Apply mask: 1 = use agent action, 0 = use random action
+                action = mask * action + (1 - mask) * random_action
+                
         return action
 
-    def sample_as_env_action(self, latent, greedy=False):
-        action = self.sample(latent, greedy)
+    def sample_as_env_action(self, latent, greedy=False, statemask=None):
+        action = self.sample(latent, greedy, statemask)
         return action.detach().cpu().squeeze(-1).numpy()
 
     def update(self, latent, action, old_logprob, old_value, reward, termination, logger=None):
