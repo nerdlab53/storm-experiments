@@ -6,6 +6,8 @@ import numpy as np
 from sub_models.statemask import StateMaskGate
 
 
+# this is a minimal implementation
+
 class StateMaskTrainer:
     """Decoupled training for StateMask gate to balance fidelity and sparsity.
     
