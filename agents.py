@@ -121,15 +121,11 @@ class ActorCriticAgent(nn.Module):
             else:
                 action = dist.sample()
             
-            # Apply StateMask blinding if provided
+            # check if statemask is enabled
             if statemask is not None:
                 gate_prob = statemask(latent)  # [B, 1]
                 mask = torch.bernoulli(gate_prob).squeeze(-1)  # [B]
-                
-                # Generate random actions for blinding
                 random_action = torch.randint_like(action, 0, logits.shape[-1])
-                
-                # Apply mask: 1 = use agent action, 0 = use random action
                 action = mask * action + (1 - mask) * random_action
                 
         return action
@@ -187,3 +183,5 @@ class ActorCriticAgent(nn.Module):
             logger.log('ActorCritic/S', S.item())
             logger.log('ActorCritic/norm_ratio', norm_ratio.item())
             logger.log('ActorCritic/total_loss', loss.item())
+            q_range = (logits.max(dim=-1)[0] - logits.min(dim=-1)[0]).mean()
+            logger.log("ActorCritic/q_value_range", q_range.item())

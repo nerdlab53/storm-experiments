@@ -18,16 +18,11 @@ import os
 import numpy as np
 import time
 
-# Training parameters - OPTIMIZED FOR EFFICIENCY
+# Training parameters
 ENV_NAME = "ALE/Pong-v5"
-
-# Adaptive training: start smaller, extend if needed
-MIN_TIMESTEPS = 100_000      # Minimum for meaningful learning
-MAX_TIMESTEPS = 400_000      # Maximum if needed
-TARGET_PERFORMANCE = -12.0   # Stop early if achieved (Pong: -21 to +21, -12 is good)
-
-FRAME_STACK_1 = 4   # Agent 1: 4-frame stack (optimal for Pong)
-FRAME_STACK_2 = 8   # Agent 2: 8-frame stack (reduced from 16 for speed)
+TOTAL_TIMESTEPS = 500_000  # Further reduced for memory constraints
+FRAME_STACK_1 = 4   # Agent 1: 4-frame stack
+FRAME_STACK_2 = 8   # Agent 2: 8-frame stack 
 LOG_DIR_1 = "./dqn_pong_agent1_logs/"
 LOG_DIR_2 = "./dqn_pong_agent2_logs/"
 MODEL_SAVE_PATH_1 = "./dqn_pong_agent1.zip"
@@ -47,153 +42,137 @@ env1 = create_env(FRAME_STACK_1)  # 4-frame stack
 env2 = create_env(FRAME_STACK_2)  # 16-frame stack
 
 # Create two DQN models with different configurations for comparison
-# Agent 1: 4-frame stack configuration - OPTIMIZED FOR SPEED
+# Agent 1: 4-frame stack configuration
 model1 = DQN(
     "CnnPolicy",
     env1,
     verbose=1,
     tensorboard_log=LOG_DIR_1,
-    learning_rate=5e-4,        # Higher LR for faster learning
-    buffer_size=100_000,       # Larger buffer for better sample efficiency
-    learning_starts=10_000,    # Start learning after more experience
-    batch_size=64,             # Larger batch for more stable gradients
+    learning_rate=1e-4,
+    buffer_size=30_000,  
+    learning_starts=3_000,
+    batch_size=32,
     tau=1.0,
     gamma=0.99,
     train_freq=4,
-    gradient_steps=2,          # More gradient steps per update
-    target_update_interval=1_000,  # More frequent target updates
-    exploration_fraction=0.05, # Shorter exploration phase
-    exploration_final_eps=0.005,  # Lower final epsilon
+    gradient_steps=1,
+    target_update_interval=3_000,
+    exploration_fraction=0.1,
+    exploration_final_eps=0.01,
     seed=42
 )
 
-# Agent 2: 8-frame stack configuration - MEMORY OPTIMIZED
+# Agent 2: 8-frame stack configuration
 model2 = DQN(
     "CnnPolicy",
     env2,
     verbose=1,
     tensorboard_log=LOG_DIR_2,
-    learning_rate=3e-4,        # Balanced LR for 8-frame stack
-    buffer_size=60_000,        # Reduced buffer due to memory constraints
-    learning_starts=10_000,    # Same learning starts  
-    batch_size=32,             # Smaller batch due to larger frame stack
+    learning_rate=1e-4,  # Same learning rate for fair comparison
+    buffer_size=30_000,  # Smaller buffer due to 8-frame stack memory usage
+    learning_starts=3_000,  # Same learning starts
+    batch_size=32,  # Same batch size
     tau=1.0,
-    gamma=0.99,
+    gamma=0.99,  # Same gamma for fair comparison
     train_freq=4,
-    gradient_steps=1,          # Single gradient step due to memory
-    target_update_interval=1_000,  # More frequent updates
-    exploration_fraction=0.05, # Shorter exploration
-    exploration_final_eps=0.005,  # Lower final epsilon
-    seed=42
+    gradient_steps=1,
+    target_update_interval=3_000,  # Same target update interval
+    exploration_fraction=0.1,  # Same exploration
+    exploration_final_eps=0.01,  # Same final epsilon
+    seed=42  # Same seed for fair comparison
 )
 
 # Create evaluation environments and callbacks for both agents
 eval_env1 = create_env(FRAME_STACK_1)  # 4-frame stack
 eval_env2 = create_env(FRAME_STACK_2)  # 8-frame stack
 
-class SmartEarlyStoppingCallback(EvalCallback):
-    """Enhanced callback with early stopping based on performance"""
-    
-    def __init__(self, eval_env, best_model_save_path, log_path, eval_freq, 
-                 n_eval_episodes, target_performance=-12.0, patience=5):
-        super().__init__(eval_env, best_model_save_path, log_path, eval_freq, 
-                        n_eval_episodes, deterministic=True, render=False)
-        self.target_performance = target_performance
-        self.patience = patience
-        self.no_improvement_count = 0
-        self.best_mean_reward = float('-inf')
-        
-    def _on_step(self) -> bool:
-        continue_training = super()._on_step()
-        
-        if self.last_mean_reward is not None:
-            # Check if target performance reached
-            if self.last_mean_reward >= self.target_performance:
-                print(f"🎯 Target performance {self.target_performance} reached! "
-                      f"Current: {self.last_mean_reward:.2f}")
-                return False  # Stop training
-            
-            # Check for improvement
-            if self.last_mean_reward > self.best_mean_reward + 1.0:  # 1.0 improvement threshold
-                self.best_mean_reward = self.last_mean_reward
-                self.no_improvement_count = 0
-            else:
-                self.no_improvement_count += 1
-            
-            # Early stop if no improvement for too long and past minimum steps
-            if (self.no_improvement_count >= self.patience and 
-                self.num_timesteps >= MIN_TIMESTEPS):
-                print(f"🛑 Early stopping: No improvement for {self.patience} evaluations")
-                return False
-                
-        return continue_training
-
-eval_callback1 = SmartEarlyStoppingCallback(
+eval_callback1 = EvalCallback(
     eval_env1,
     best_model_save_path=LOG_DIR_1,
     log_path=LOG_DIR_1,
-    eval_freq=15_000,  # More frequent evaluation for early stopping
-    n_eval_episodes=15,  # More episodes for reliable estimates
-    target_performance=TARGET_PERFORMANCE,
-    patience=3  # Stop after 3 evaluations without improvement
+    eval_freq=20_000,  # Evaluate every 20k steps (adjusted for shorter training)
+    n_eval_episodes=10,
+    deterministic=True,
+    render=False
 )
 
-eval_callback2 = SmartEarlyStoppingCallback(
+eval_callback2 = EvalCallback(
     eval_env2,
     best_model_save_path=LOG_DIR_2,
     log_path=LOG_DIR_2,
-    eval_freq=15_000,
-    n_eval_episodes=15,
-    target_performance=TARGET_PERFORMANCE,
-    patience=3
+    eval_freq=20_000,
+    n_eval_episodes=10,
+    deterministic=True,
+    render=False
 )
 
-# Train both models with smart early stopping
-print(f"🚀 SMART TRAINING: {ENV_NAME}")
-print(f"Min timesteps: {MIN_TIMESTEPS:,}, Max timesteps: {MAX_TIMESTEPS:,}")
-print(f"Target performance: {TARGET_PERFORMANCE}")
-print(f"Agent 1: {FRAME_STACK_1}-frame stack (100k buffer, optimized)")
-print(f"Agent 2: {FRAME_STACK_2}-frame stack (60k buffer, memory-optimized)")
-print("Early stopping enabled - will stop when target reached or no improvement")
-print("=" * 80)
+# Train both models in chunks of 100,000 steps
+CHUNK_SIZE = 100_000
+num_chunks = TOTAL_TIMESTEPS // CHUNK_SIZE
 
-# Train Agent 1
-print("\n🤖 Training Agent 1 (4-frame stack)...")
-start_time1 = time.time()
-try:
-    model1.learn(
-        total_timesteps=MAX_TIMESTEPS,
-        callback=eval_callback1,
-        progress_bar=True
-    )
-except KeyboardInterrupt:
-    print("Training interrupted by user")
-train_time1 = time.time() - start_time1
-actual_timesteps1 = model1.num_timesteps
-
-# Train Agent 2
-print(f"\n🤖 Training Agent 2 ({FRAME_STACK_2}-frame stack)...")
-start_time2 = time.time()
-try:
+for chunk in range(num_chunks):
+    print(f"\n🔄 Training chunk {chunk + 1}/{num_chunks} ({CHUNK_SIZE} steps)...")
+    
+    # Train Agent 2 chunk
+    print("  Training Agent 2...")
     model2.learn(
-        total_timesteps=MAX_TIMESTEPS,
+        total_timesteps=CHUNK_SIZE,
         callback=eval_callback2,
-        progress_bar=True
+        progress_bar=True,
+        reset_num_timesteps=False
     )
-except KeyboardInterrupt:
-    print("Training interrupted by user")
-train_time2 = time.time() - start_time2
-actual_timesteps2 = model2.num_timesteps
+    
+    # Train Agent 1 chunk
+    print("  Training Agent 1...")
+    model1.learn(
+        total_timesteps=CHUNK_SIZE,
+        callback=eval_callback1,
+        progress_bar=True,
+        reset_num_timesteps=False
+    )
+    
+    # Evaluate and save after chunk
+    current_step = (chunk + 1) * CHUNK_SIZE
+    print(f"\n📊 Evaluating after {current_step} steps...")
+    
+    rewards1 = evaluate_agent(model1, eval_final_env1, n_episodes=20)
+    rewards2 = evaluate_agent(model2, eval_final_env2, n_episodes=20)
+    
+    mean_reward1 = np.mean(rewards1)
+    std_reward1 = np.std(rewards1)
+    mean_reward2 = np.mean(rewards2)
+    std_reward2 = np.std(rewards2)
+    
+    if mean_reward1 > mean_reward2:
+        winner = f"Agent 1 ({FRAME_STACK_1}-frame stack)"
+        improvement = ((mean_reward1 - mean_reward2) / abs(mean_reward2)) * 100 if mean_reward2 != 0 else float('inf')
+    else:
+        winner = f"Agent 2 ({FRAME_STACK_2}-frame stack)"
+        improvement = ((mean_reward2 - mean_reward1) / abs(mean_reward1)) * 100 if mean_reward1 != 0 else float('inf')
+    
+    # Save to chunk-specific file
+    chunk_filename = f'dqn_pong_eval_results_step_{current_step}.txt'
+    with open(chunk_filename, 'w') as f:
+        f.write(f"DQN Pong Evaluation Results - Step {current_step}\n")
+        f.write("=" * 40 + "\n\n")
+        
+        f.write(f"Agent 1 ({FRAME_STACK_1}-frame stack):\n")
+        f.write(f"  - Mean reward: {mean_reward1:.2f} ± {std_reward1:.2f}\n")
+        f.write(f"  - Best episode: {max(rewards1):.2f}\n")
+        f.write(f"  - Worst episode: {min(rewards1):.2f}\n\n")
+        
+        f.write(f"Agent 2 ({FRAME_STACK_2}-frame stack):\n")
+        f.write(f"  - Mean reward: {mean_reward2:.2f} ± {std_reward2:.2f}\n")
+        f.write(f"  - Best episode: {max(rewards2):.2f}\n")
+        f.write(f"  - Worst episode: {min(rewards2):.2f}\n\n")
+        
+        f.write(f"WINNER at this step: {winner}\n")
+        f.write(f"Performance improvement: {improvement:.1f}%\n")
+    
+    print(f"📝 Intermediate results saved to {chunk_filename}")
 
-# Save both models
-model1.save(MODEL_SAVE_PATH_1)
-model2.save(MODEL_SAVE_PATH_2)
-print(f"\nAgent 1 model saved to {MODEL_SAVE_PATH_1}")
-print(f"Agent 2 model saved to {MODEL_SAVE_PATH_2}")
-
-# Performance comparison
-print("\n" + "=" * 80)
-print("🏆 PERFORMANCE COMPARISON")
+# Final full evaluation (as before)
+print("\n🏆 FINAL PERFORMANCE COMPARISON")
 print("=" * 80)
 
 def evaluate_agent(model, env, n_episodes=20):
@@ -216,7 +195,7 @@ def evaluate_agent(model, env, n_episodes=20):
 
 # Create fresh evaluation environments
 eval_final_env1 = create_env(FRAME_STACK_1)  # 4-frame stack
-eval_final_env2 = create_env(FRAME_STACK_2)  # 16-frame stack
+eval_final_env2 = create_env(FRAME_STACK_2)  # 8-frame stack
 
 print("Evaluating Agent 1 (20 episodes)...")
 rewards1 = evaluate_agent(model1, eval_final_env1, n_episodes=20)
@@ -230,24 +209,20 @@ std_reward1 = np.std(rewards1)
 mean_reward2 = np.mean(rewards2)
 std_reward2 = np.std(rewards2)
 
-print(f"\n📊 SMART TRAINING RESULTS SUMMARY:")
+print(f"\n📊 RESULTS SUMMARY:")
 print(f"Agent 1 ({FRAME_STACK_1}-frame stack):")
-print(f"  - Training time: {train_time1:.1f} seconds ({train_time1/60:.1f} minutes)")
-print(f"  - Timesteps used: {actual_timesteps1:,} / {MAX_TIMESTEPS:,}")
-print(f"  - Efficiency: {actual_timesteps1/train_time1:.0f} steps/second")
+print(f"  - Training time: {train_time1:.1f} seconds")
 print(f"  - Mean reward: {mean_reward1:.2f} ± {std_reward1:.2f}")
 print(f"  - Best episode: {max(rewards1):.2f}")
 print(f"  - Worst episode: {min(rewards1):.2f}")
-print(f"  - Buffer size: 100,000")
+print(f"  - Buffer size: 30,000")
 
 print(f"\nAgent 2 ({FRAME_STACK_2}-frame stack):")
-print(f"  - Training time: {train_time2:.1f} seconds ({train_time2/60:.1f} minutes)")
-print(f"  - Timesteps used: {actual_timesteps2:,} / {MAX_TIMESTEPS:,}")
-print(f"  - Efficiency: {actual_timesteps2/train_time2:.0f} steps/second")
+print(f"  - Training time: {train_time2:.1f} seconds")
 print(f"  - Mean reward: {mean_reward2:.2f} ± {std_reward2:.2f}")
 print(f"  - Best episode: {max(rewards2):.2f}")
 print(f"  - Worst episode: {min(rewards2):.2f}")
-print(f"  - Buffer size: 60,000")
+print(f"  - Buffer size: 15,000")
 
 # Determine winner
 if mean_reward1 > mean_reward2:
@@ -262,6 +237,30 @@ print(f"Performance improvement: {improvement:.1f}%")
 print(f"\n💡 INSIGHTS:")
 print(f"This comparison shows whether more temporal information ({FRAME_STACK_2} frames)")
 print(f"outweighs the benefits of a larger replay buffer ({FRAME_STACK_1} frames with 2x larger buffer).")
+
+# Save evaluation results to TXT file
+with open('dqn_pong_eval_results.txt', 'w') as f:
+    f.write("DQN Pong Evaluation Results\n")
+    f.write("=" * 40 + "\n\n")
+    
+    f.write(f"Agent 1 ({FRAME_STACK_1}-frame stack):\n")
+    f.write(f"  - Training time: {train_time1:.1f} seconds\n")
+    f.write(f"  - Mean reward: {mean_reward1:.2f} ± {std_reward1:.2f}\n")
+    f.write(f"  - Best episode: {max(rewards1):.2f}\n")
+    f.write(f"  - Worst episode: {min(rewards1):.2f}\n")
+    f.write(f"  - Buffer size: 30,000\n\n")
+    
+    f.write(f"Agent 2 ({FRAME_STACK_2}-frame stack):\n")
+    f.write(f"  - Training time: {train_time2:.1f} seconds\n")
+    f.write(f"  - Mean reward: {mean_reward2:.2f} ± {std_reward2:.2f}\n")
+    f.write(f"  - Best episode: {max(rewards2):.2f}\n")
+    f.write(f"  - Worst episode: {min(rewards2):.2f}\n")
+    f.write(f"  - Buffer size: 15,000\n\n")
+    
+    f.write(f"WINNER: {winner}\n")
+    f.write(f"Performance improvement: {improvement:.1f}%\n")
+
+print("\n📝 Evaluation results saved to dqn_pong_eval_results.txt")
 
 # Close environments
 env1.close()

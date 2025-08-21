@@ -227,8 +227,7 @@ class WorldModel(nn.Module):
     def __init__(self, in_channels, action_dim,
                  transformer_max_length, transformer_hidden_dim, transformer_num_layers, transformer_num_heads,
                  use_progressive_masking=True, use_progressive_in_kv=False, use_mild_decay_in_kv=False,
-                 fixed_mask_percent=0.0, fixed_mask_percents=None, use_random_mask=False, use_soft_penalty=True,
-                 use_statemask=False, statemask_percents=None):  # Add new params for StateMask
+                 fixed_mask_percent=0.0, fixed_mask_percents=None, use_random_mask=False, use_soft_penalty=True):
         super().__init__()
         self.transformer_hidden_dim = transformer_hidden_dim
         self.final_feature_width = 4
@@ -260,10 +259,6 @@ class WorldModel(nn.Module):
         
         self.use_random_mask = use_random_mask
         self.use_soft_penalty = use_soft_penalty
-        self.use_statemask = use_statemask
-        if self.use_statemask:
-            from sub_models.statemask import StateMask  # Import new module
-            self.statemask = StateMask(transformer_hidden_dim, transformer_num_heads)
 
         self.encoder = EncoderBN(
             in_channels=in_channels,
@@ -342,10 +337,6 @@ class WorldModel(nn.Module):
                 )
             else:
                 temporal_mask = get_subsequent_mask(latent)
-            if self.use_statemask:
-                statemask = self.statemask(latent)  # Generate StateMask
-                # Combine: multiply masks (assuming soft masks)
-                temporal_mask = temporal_mask * statemask.mean(dim=1, keepdim=True)  # Simple combination, average over heads for minimal change
             dist_feat = self.storm_transformer(latent, action, temporal_mask)
             last_dist_feat = dist_feat[:, -1:]
             prior_logits = self.dist_head.forward_prior(last_dist_feat)
@@ -437,6 +428,9 @@ class WorldModel(nn.Module):
                 obs_hat_list.append(last_obs_hat[::imagine_batch_size//16])  # uniform sample vec_env
 
         if log_video:
+            if logger is not None:
+                avg_imagined_reward = self.reward_hat_buffer.mean().item()
+                logger.log("Imagine/avg_imagined_reward", avg_imagined_reward)
             logger.log("Imagine/predict_video", torch.clamp(torch.cat(obs_hat_list, dim=1), 0, 1).cpu().float().detach().numpy())
 
         return torch.cat([self.latent_buffer, self.hidden_buffer], dim=-1), self.action_buffer, self.reward_hat_buffer, self.termination_hat_buffer

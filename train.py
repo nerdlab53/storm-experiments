@@ -26,6 +26,7 @@ from sub_models.world_models import WorldModel, MSELoss
 from sub_models.novelty_detector import WorldModelNoveltyWrapper
 from novelty_injector import NoveltyEnvironmentWrapper, NoveltyInjector, PREDEFINED_NOVELTIES
 from device_utils import get_device, move_to_device, print_device_info, DEVICE
+from statemask_trainer_simple import create_simple_statemask_trainer
 
 
 def build_single_env(env_name, image_size, seed):
@@ -71,7 +72,7 @@ def world_model_imagine_data(replay_buffer: ReplayBuffer,
                              world_model: WorldModel, agent: agents.ActorCriticAgent,
                              imagine_batch_size, imagine_demonstration_batch_size,
                              imagine_context_length, imagine_batch_length,
-                             log_video, logger):
+                             log_video, logger, statemask=None):
     '''
     Sample context from replay buffer, then imagine data with world model and agent
     '''
@@ -87,7 +88,8 @@ def world_model_imagine_data(replay_buffer: ReplayBuffer,
         imagine_batch_size=imagine_batch_size+imagine_demonstration_batch_size,
         imagine_batch_length=imagine_batch_length,
         log_video=log_video,
-        logger=logger
+        logger=logger,
+        statemask=statemask
     )
     return latent, action, None, None, reward_hat, termination_hat
 
@@ -99,7 +101,9 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
                                   batch_size, demonstration_batch_size, batch_length,
                                   imagine_batch_size, imagine_demonstration_batch_size,
                                   imagine_context_length, imagine_batch_length,
-                                  save_every_steps, seed, logger, novelty_config=None):
+                                  save_every_steps, seed, logger, novelty_config=None,
+                                  statemask_trainer=None, statemask_warmup_steps=8000,
+                                  statemask_update_frequency=750):
     # create ckpt dir
     os.makedirs(f"ckpt/{args.n}", exist_ok=True)
 
@@ -112,6 +116,12 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
     novelty_detection_enabled = hasattr(world_model, 'novelty_detector')
     if novelty_detection_enabled:
         print(colorama.Fore.CYAN + "Novelty detection enabled during training" + colorama.Style.RESET_ALL)
+    
+    # Check if StateMask training is enabled
+    statemask_enabled = statemask_trainer is not None
+    if statemask_enabled:
+        print(colorama.Fore.CYAN + f"StateMask training enabled with {statemask_warmup_steps} warmup steps" + colorama.Style.RESET_ALL)
+        print(colorama.Fore.CYAN + f"StateMask gate updates every {statemask_update_frequency} steps" + colorama.Style.RESET_ALL)
 
     # reset envs and variables
     sum_reward = np.zeros(num_envs)
@@ -136,10 +146,22 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
                     # prior_flattened_sample represents what the model thinks the current state looks like
                     # last_dist_feat -> sequential info from the transformer containing imp information such as dynamics etc. basically which led to the logits
                     prior_flattened_sample, last_dist_feat = world_model.calc_last_dist_feat(context_latent, model_context_action)
+                    
+                    # check if statemask ready to train
+                    use_statemask_for_sampling = (statemask_enabled and 
+                                                 total_steps * num_envs >= statemask_warmup_steps)
+                    statemask_for_sampling = statemask_trainer.statemask if use_statemask_for_sampling else None
+                    
+                    combined_state = torch.cat([prior_flattened_sample, last_dist_feat], dim=-1)
                     action = agent.sample_as_env_action(
-                        torch.cat([prior_flattened_sample, last_dist_feat], dim=-1),
-                        greedy=False
+                        combined_state,
+                        greedy=False,
+                        statemask=statemask_for_sampling
                     )
+                    
+                    # collect for statemask buffer
+                    if statemask_enabled and total_steps * num_envs >= statemask_warmup_steps:
+                        statemask_trainer.collect_experience(combined_state)
                     
                     # check if novelty detection enabled and then perform
                     if novelty_detection_enabled and len(context_obs) > 0:
@@ -200,13 +222,27 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
             )
         # <<< train world model part
 
+        # train StateMask part >>>
+        if statemask_enabled and total_steps * num_envs >= statemask_warmup_steps:
+            if total_steps % (statemask_update_frequency//num_envs) == 0:
+                statemask_metrics = statemask_trainer.train_step()
+                for key, value in statemask_metrics.items():
+                    logger.log(key, value)
+        # <<< train StateMask part
+        
         # train agent part >>>
         if replay_buffer.ready() and total_steps % (train_agent_every_steps//num_envs) == 0 and total_steps*num_envs >= 0:
-            if total_steps % (save_every_steps//num_envs) == 0:
+            # if total_steps % (save_every_steps//num_envs) == 0:
+            #     log_video = True
+            if total_steps % 2500 == 0:
                 log_video = True
             else:
                 log_video = False
 
+            # Use StateMask for imagination only after warmup and if enabled
+            use_statemask_for_imagination = (statemask_enabled and 
+                                           total_steps * num_envs >= statemask_warmup_steps)
+            
             imagine_latent, agent_action, agent_logprob, agent_value, imagine_reward, imagine_termination = world_model_imagine_data(
                 replay_buffer=replay_buffer,
                 world_model=world_model,
@@ -216,9 +252,9 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
                 imagine_context_length=imagine_context_length,
                 imagine_batch_length=imagine_batch_length,
                 log_video=log_video,
-                logger=logger
+                logger=logger,
+                statemask=statemask_trainer.statemask if use_statemask_for_imagination else None
             )
-
             agent.update(
                 latent=imagine_latent,
                 action=agent_action,
@@ -235,6 +271,11 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
             print(colorama.Fore.GREEN + f"Saving model at total steps {total_steps}" + colorama.Style.RESET_ALL)
             torch.save(world_model.state_dict(), f"ckpt/{args.n}/world_model_{total_steps}.pth")
             torch.save(agent.state_dict(), f"ckpt/{args.n}/agent_{total_steps}.pth")
+            
+            # Save StateMask if enabled
+            if statemask_enabled:
+                torch.save(statemask_trainer.statemask.state_dict(), f"ckpt/{args.n}/statemask_{total_steps}.pth")
+                print(colorama.Fore.CYAN + f"Saved StateMask model" + colorama.Style.RESET_ALL)
             
             # Save novelty detection logs if enabled
             if novelty_detection_enabled:
@@ -329,6 +370,24 @@ if __name__ == "__main__":
         # build world model and agent
         world_model = build_world_model(conf, action_dim)
         agent = build_agent(conf, action_dim)
+        
+        # Create StateMask trainer if enabled
+        statemask_trainer = None
+        if hasattr(conf.Models, 'StateMask') and getattr(conf.Models.StateMask, 'Enabled', False):
+            feat_dim = 32*32 + conf.Models.WorldModel.TransformerHiddenDim
+            statemask_config = {
+                'hidden_dim': getattr(conf.Models.StateMask, 'HiddenDim', 128),
+                'lr': getattr(conf.Models.StateMask, 'LR', 1e-4),
+                'sparsity_weight': getattr(conf.Models.StateMask, 'SparsityWeight', 0.1),
+                'target_sparsity': getattr(conf.Models.StateMask, 'TargetSparsity', 0.3)
+            }
+            statemask, statemask_trainer = create_simple_statemask_trainer(
+                feat_dim, 
+                agent.value,  # Pass agent's value function
+                statemask_config
+            )
+            statemask = move_to_device(statemask)
+            print(colorama.Fore.CYAN + f"StateMask trainer created with target sparsity: {statemask_config['target_sparsity']}" + colorama.Style.RESET_ALL)
 
         # build replay buffer
         replay_buffer = ReplayBuffer(
@@ -383,7 +442,10 @@ if __name__ == "__main__":
             save_every_steps=conf.JointTrainAgent.SaveEverySteps,
             seed=args.seed,
             logger=logger,
-            novelty_config=novelty_config
+            novelty_config=novelty_config,
+            statemask_trainer=statemask_trainer,
+            statemask_warmup_steps=getattr(conf.Models.StateMask, 'WarmupSteps', 8000) if hasattr(conf.Models, 'StateMask') else 8000,
+            statemask_update_frequency=getattr(conf.Models.StateMask, 'TrainFrequency', 750) if hasattr(conf.Models, 'StateMask') else 750
         )
     else:
         raise NotImplementedError(f"Task {conf.Task} not implemented")

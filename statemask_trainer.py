@@ -22,10 +22,24 @@ class StateMaskTrainer:
         sparsity_weight: float = 0.1,
         target_sparsity: float = 0.3,
         train_frequency: int = 100,
-        batch_size: int = 256
+        batch_size: int = 256,
+        target_update_frequency: int = 1000,  # Slower target updates
+        target_tau: float = 0.005  # Soft update coefficient for target network
     ):
         self.statemask = statemask
         self.optimizer = optim.Adam(statemask.parameters(), lr=lr)
+        
+        # Create target network for slower updates - extract parameters from main network
+        feat_dim = statemask.net[0].in_features
+        hidden_dim = statemask.net[0].out_features
+        self.target_statemask = StateMaskGate(feat_dim, hidden_dim)
+        self.target_statemask.load_state_dict(statemask.state_dict())
+        self.target_statemask.eval()
+        
+        # Target network update parameters
+        self.target_update_frequency = target_update_frequency
+        self.target_tau = target_tau
+        self.target_update_counter = 0
         
         # Loss weighting
         self.fidelity_weight = fidelity_weight
@@ -123,6 +137,13 @@ class StateMaskTrainer:
         torch.nn.utils.clip_grad_norm_(self.statemask.parameters(), max_norm=1.0)
         self.optimizer.step()
         
+        # Update target network (slower updates)
+        self.target_update_counter += 1
+        if self.target_update_counter % self.target_update_frequency == 0:
+            self._hard_update_target()
+        else:
+            self._soft_update_target()
+        
         # Return metrics
         metrics = {
             'statemask/total_loss': total_loss.item(),
@@ -131,6 +152,7 @@ class StateMaskTrainer:
             'statemask/gate_prob_mean': gate_probs.mean().item(),
             'statemask/current_sparsity': current_sparsity.item(),
             'statemask/target_sparsity': self.target_sparsity,
+            'statemask/target_update_counter': self.target_update_counter,
         }
         
         return metrics
@@ -169,6 +191,18 @@ class StateMaskTrainer:
     def set_target_sparsity(self, target: float):
         """Dynamically adjust target sparsity during training."""
         self.target_sparsity = max(0.0, min(1.0, target))
+    
+    def _soft_update_target(self):
+        """Soft update of target network parameters."""
+        with torch.no_grad():
+            for target_param, param in zip(self.target_statemask.parameters(), self.statemask.parameters()):
+                target_param.data.copy_(
+                    self.target_tau * param.data + (1.0 - self.target_tau) * target_param.data
+                )
+    
+    def _hard_update_target(self):
+        """Hard update of target network parameters."""
+        self.target_statemask.load_state_dict(self.statemask.state_dict())
     
     def get_blinding_statistics(self, states: torch.Tensor) -> dict:
         """Get statistics about which states would be blinded."""
@@ -210,7 +244,9 @@ def create_statemask_trainer(feat_dim: int, config: dict) -> Tuple[StateMaskGate
         sparsity_weight=config.get('sparsity_weight', 0.1),
         target_sparsity=config.get('target_sparsity', 0.3),
         train_frequency=config.get('train_frequency', 100),
-        batch_size=config.get('batch_size', 256)
+        batch_size=config.get('batch_size', 256),
+        target_update_frequency=config.get('target_update_frequency', 1000),
+        target_tau=config.get('target_tau', 0.005)
     )
     
     return statemask, trainer
