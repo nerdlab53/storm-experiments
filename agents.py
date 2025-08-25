@@ -124,14 +124,15 @@ class ActorCriticAgent(nn.Module):
             # check if statemask is enabled
             if statemask is not None:
                 gate_prob = statemask(latent)  # [B, 1]
-                mask = torch.bernoulli(gate_prob).squeeze(-1)  # [B]
+                mask_bool = torch.bernoulli(gate_prob).squeeze(-1).to(torch.bool)  # [B] bool
                 random_action = torch.randint_like(action, 0, logits.shape[-1])
-                action = mask * action + (1 - mask) * random_action
+                action = torch.where(mask_bool, action, random_action)  # keep Long dtype
                 
         return action
 
     def sample_as_env_action(self, latent, greedy=False, statemask=None):
         action = self.sample(latent, greedy, statemask)
+        action = action.to(torch.int64)
         return action.detach().cpu().squeeze(-1).numpy()
 
     def update(self, latent, action, old_logprob, old_value, reward, termination, logger=None):
