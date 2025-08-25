@@ -92,6 +92,16 @@ def load_config(config_path):
     conf.Models.Agent.Lambda = 0.0
     conf.Models.Agent.EntropyCoef = 0.0
 
+    # StateMask config defaults (YAML can override these)
+    conf.Models.StateMask = CN()
+    conf.Models.StateMask.Enabled = False
+    conf.Models.StateMask.HiddenDim = 128
+    conf.Models.StateMask.LR = 1e-4
+    conf.Models.StateMask.SparsityWeight = 0.1
+    conf.Models.StateMask.TargetSparsity = 0.3
+    conf.Models.StateMask.TrainFrequency = 750
+    conf.Models.StateMask.WarmupSteps = 8000
+
     conf.Models.NoveltyDetection = CN()
     conf.Models.NoveltyDetection.Enabled = False
     conf.Models.NoveltyDetection.HistoryLength = 100
