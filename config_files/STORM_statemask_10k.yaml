@@ -33,7 +33,7 @@ Models:
     UseProgressiveInKVCache: False
     UseMildDecayInKV: False
     FixedMaskPercents: [0.0, 0.0357, 0.0714, 0.1071, 0.1429, 0.1786, 0.2143, 0.25]
-    UseRandomMask: True
+    UseRandomMask: False
     UseSoftPenalty: False
 
   Agent:
