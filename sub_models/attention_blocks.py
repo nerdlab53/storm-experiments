@@ -192,6 +192,7 @@ class MultiHeadAttentionProgressive(nn.Module):
         self.n_head = n_head
         self.d_k = d_k
         self.d_v = d_v
+        self.ablate_head_idx = None
 
         self.w_qs = nn.Linear(d_model, n_head * d_k, bias=False)
         self.w_ks = nn.Linear(d_model, n_head * d_k, bias=False)
@@ -203,6 +204,12 @@ class MultiHeadAttentionProgressive(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
         self.layer_norm = nn.LayerNorm(d_model, eps=1e-6)
+    
+    def set_head_ablation(self, head_idx):
+        self.ablate_head_idx = head_idx
+    
+    def clear_head_ablation(self):
+        self.ablate_head_idx = None
 
     def _is_progressive_mask(self, mask):
         """Detect if mask is progressive (continuous values) or boolean"""
@@ -238,7 +245,10 @@ class MultiHeadAttentionProgressive(nn.Module):
             q, attn = self.attention_progressive(q, k, v, progressive_mask=mask)
         else:
             q, attn = self.attention_regular(q, k, v, mask=mask)
+        
 
+        if hasattr(self, 'ablate_head_idx') and self.ablate_head_idx is not None:
+            attn[:, self.ablate_head_idx, :, :] = 0.0
         # Transpose to move the head dimension back: b x lq x n x dv
         # Combine the last two dimensions to concatenate all the heads together: b x lq x (n*dv)
         q = q.transpose(1, 2).contiguous().view(sz_b, len_q, -1)

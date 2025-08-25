@@ -52,7 +52,7 @@ Models:
     SparsityWeight: 0.1                # Weight for sparsity constraint
     TargetSparsity: 0.3                # Target 30% blinding rate
     TrainFrequency: 750                # Gate updates every 750 steps (500-1000 range)
-    WarmupSteps: 8000                  # TWM runs for 8K steps before StateMask introduction
+    WarmupSteps: 10000                 # TWM runs for 10K steps before StateMask introduction
 
   NoveltyDetection:
     Enabled: True

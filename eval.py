@@ -23,6 +23,7 @@ import env_wrapper
 import agents
 from sub_models.functions_losses import symexp
 from sub_models.world_models import WorldModel, MSELoss
+from sub_models.statemask import StateMaskGate
 
 
 def process_visualize(img):
@@ -50,7 +51,8 @@ def build_vec_env(env_name, image_size, num_envs):
 
 
 def eval_episodes(num_episode, env_name, max_steps, num_envs, image_size,
-                  world_model: WorldModel, agent: agents.ActorCriticAgent, eval_seed=42):
+                  world_model: WorldModel, agent: agents.ActorCriticAgent, eval_seed=42,
+                  statemask: StateMaskGate = None):
     world_model.eval()
     agent.eval()
     
@@ -82,7 +84,8 @@ def eval_episodes(num_episode, env_name, max_steps, num_envs, image_size,
                 prior_flattened_sample, last_dist_feat = world_model.calc_last_dist_feat(context_latent, model_context_action)
                 action = agent.sample_as_env_action(
                     torch.cat([prior_flattened_sample, last_dist_feat], dim=-1),
-                    greedy=True  # Use deterministic sampling for reproducible results
+                    greedy=True,
+                    statemask=statemask
                 )
 
         context_obs.append(rearrange(torch.Tensor(current_obs).cuda(), "B H W C -> B 1 C H W")/255)
@@ -122,6 +125,7 @@ if __name__ == "__main__":
     parser.add_argument("-env_name", type=str, required=True)
     parser.add_argument("-run_name", type=str, required=True)
     parser.add_argument("-eval_seed", type=int, default=42, help="Seed for evaluation episodes")
+    parser.add_argument("--statemask_eval", action="store_true", help="Apply saved StateMask during evaluation")
     args = parser.parse_args()
     conf = load_config(args.config_path)
     print(colorama.Fore.RED + str(args) + colorama.Style.RESET_ALL)
@@ -159,6 +163,20 @@ if __name__ == "__main__":
     for step in tqdm(steps):
         world_model.load_state_dict(torch.load(f"{root_path}/world_model_{step}.pth"))
         agent.load_state_dict(torch.load(f"{root_path}/agent_{step}.pth"))
+        # Optionally load StateMask for masked-policy evaluation
+        statemask = None
+        if args.statemask_eval:
+            statemask_path = f"{root_path}/statemask_{step}.pth"
+            if os.path.exists(statemask_path):
+                feat_dim = 32*32 + conf.Models.WorldModel.TransformerHiddenDim
+                hidden_dim = getattr(conf.Models.StateMask, 'HiddenDim', 128) if hasattr(conf.Models, 'StateMask') else 128
+                statemask = StateMaskGate(feat_dim=feat_dim, hidden_dim=hidden_dim)
+                statemask.load_state_dict(torch.load(statemask_path))
+                device = next(agent.parameters()).device
+                statemask = statemask.to(device)
+                print(colorama.Fore.CYAN + f"Loaded StateMask from {statemask_path}" + colorama.Style.RESET_ALL)
+            else:
+                print(colorama.Fore.YELLOW + f"StateMask checkpoint not found for step {step}; proceeding without mask" + colorama.Style.RESET_ALL)
         # # eval
         episode_avg_return = eval_episodes(
             num_episode=20,
@@ -168,7 +186,8 @@ if __name__ == "__main__":
             image_size=conf.BasicSettings.ImageSize,
             world_model=world_model,
             agent=agent,
-            eval_seed=args.eval_seed  # Use command line seed
+            eval_seed=args.eval_seed,  # Use command line seed
+            statemask=statemask
         )
         results.append([step, episode_avg_return])
     
