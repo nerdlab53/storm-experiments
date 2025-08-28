@@ -22,20 +22,20 @@ class SimpleStateMaskTrainer:
         agent_value_function,  # Agent's critic for estimating returns
         lr: float = 1e-4,
         clip_param: float = 0.2,
-        gate_entropy_coef: float = 0.01,
+        C2: float = 0.01,
         feat_dim: int = None,
         use_mask_critic: bool = True,
         mask_critic_hidden_dim: int = 128,
-        value_coef: float = 0.5,
+        C1: float = 0.5,
         lasso_weight: float = 1e-4
     ):
         self.statemask = statemask
         self.agent_value_function = agent_value_function
-        self.value_coef = value_coef
+        self.C1 = C1
         
         # Loss coefficients
         self.clip_param = clip_param
-        self.gate_entropy_coef = gate_entropy_coef
+        self.C2 = C2
         self.lasso_weight = lasso_weight
         
         # Device from statemask params
@@ -97,7 +97,7 @@ class SimpleStateMaskTrainer:
             critic_loss = (returns - values).pow(2).mean()
         gate_entropy = dist.entropy().mean()
         pass_through_penalty = gate_probs.mean()
-        total_loss = self.value_coef * critic_loss + actor_loss - self.gate_entropy_coef * gate_entropy + self.lasso_weight * pass_through_penalty
+        total_loss = self.C1 * critic_loss + actor_loss - self.C2 * gate_entropy + self.lasso_weight * pass_through_penalty
 
         self.optimizer.zero_grad()
         total_loss.backward()
@@ -193,11 +193,10 @@ def create_simple_statemask_trainer(
         agent_value_function=agent_value_function,
         lr=config.get('lr', 1e-4),
         clip_param=config.get('clip_param', 0.2),
-        gate_entropy_coef=config.get('gate_entropy_coef', 0.01),
+        C2=config.get('C2', 0.01),
         feat_dim=feat_dim,
         use_mask_critic=config.get('use_mask_critic', True),
         mask_critic_hidden_dim=config.get('mask_critic_hidden_dim', 128),
-        value_coef=config.get('value_coef', 0.5),
         lasso_weight=config.get('lasso_weight', 1e-4)
     )
     

@@ -27,7 +27,6 @@ from sub_models.world_models import WorldModel, MSELoss
 from sub_models.novelty_detector import WorldModelNoveltyWrapper
 from novelty_injector import NoveltyEnvironmentWrapper, NoveltyInjector, PREDEFINED_NOVELTIES
 from device_utils import get_device, move_to_device, print_device_info, DEVICE
-from statemask_trainer_simple import create_simple_statemask_trainer
 from sub_models.masknet import Masknet
 
 
