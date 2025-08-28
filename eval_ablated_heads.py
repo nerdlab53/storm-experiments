@@ -17,6 +17,7 @@ import numpy as np
 import torch
 import colorama
 import os
+import matplotlib
 import glob
 from tqdm import tqdm
 import json
@@ -24,7 +25,6 @@ from datetime import datetime
 from collections import deque
 from einops import rearrange
 import torch.nn.functional as F
-I
 from utils import seed_np_torch, load_config
 from eval import build_single_env, build_vec_env
 import train
