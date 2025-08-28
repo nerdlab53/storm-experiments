@@ -23,7 +23,7 @@ import env_wrapper
 import agents
 from sub_models.functions_losses import symexp
 from sub_models.world_models import WorldModel, MSELoss
-from sub_models.statemask import StateMaskGate
+from sub_models.masknet import Masknet
 
 
 def process_visualize(img):
@@ -52,7 +52,7 @@ def build_vec_env(env_name, image_size, num_envs):
 
 def eval_episodes(num_episode, env_name, max_steps, num_envs, image_size,
                   world_model: WorldModel, agent: agents.ActorCriticAgent, eval_seed=42,
-                  statemask: StateMaskGate = None):
+                  masknet: Masknet = None):
     world_model.eval()
     agent.eval()
     
@@ -82,11 +82,23 @@ def eval_episodes(num_episode, env_name, max_steps, num_envs, image_size,
                 model_context_action = np.stack(list(context_action), axis=1)
                 model_context_action = torch.Tensor(model_context_action).cuda()
                 prior_flattened_sample, last_dist_feat = world_model.calc_last_dist_feat(context_latent, model_context_action)
-                action = agent.sample_as_env_action(
-                    torch.cat([prior_flattened_sample, last_dist_feat], dim=-1),
-                    greedy=True,
-                    statemask=statemask
-                )
+                combined_state = torch.cat([prior_flattened_sample, last_dist_feat], dim=-1)
+                if masknet is not None:
+                    logits = agent.policy(combined_state)
+                    dist = torch.distributions.Categorical(logits=logits)
+                    agent_action = dist.probs.argmax(dim=-1)
+                    flat_state = combined_state[0, -1].detach().float().cpu().numpy()
+                    mask_dist, _ = masknet.choose_action(flat_state)
+                    mask_action = mask_dist.sample()
+                    random_action = torch.randint_like(agent_action, 0, logits.shape[-1])
+                    action_tensor = torch.where(mask_action.item() == 1, agent_action, random_action)
+                    action = action_tensor.to(torch.int64).detach().cpu().squeeze(-1).numpy()
+                else:
+                    action = agent.sample_as_env_action(
+                        combined_state,
+                        greedy=True,
+                        statemask=None
+                    )
 
         context_obs.append(rearrange(torch.Tensor(current_obs).cuda(), "B H W C -> B 1 C H W")/255)
         context_action.append(action)
@@ -125,7 +137,7 @@ if __name__ == "__main__":
     parser.add_argument("-env_name", type=str, required=True)
     parser.add_argument("-run_name", type=str, required=True)
     parser.add_argument("-eval_seed", type=int, default=42, help="Seed for evaluation episodes")
-    parser.add_argument("--statemask_eval", action="store_true", help="Apply saved StateMask during evaluation")
+    parser.add_argument("--masknet_eval", action="store_true", help="Apply saved Masknet during evaluation")
     args = parser.parse_args()
     conf = load_config(args.config_path)
     print(colorama.Fore.RED + str(args) + colorama.Style.RESET_ALL)
@@ -163,20 +175,23 @@ if __name__ == "__main__":
     for step in tqdm(steps):
         world_model.load_state_dict(torch.load(f"{root_path}/world_model_{step}.pth"))
         agent.load_state_dict(torch.load(f"{root_path}/agent_{step}.pth"))
-        # Optionally load StateMask for masked-policy evaluation
-        statemask = None
-        if args.statemask_eval:
-            statemask_path = f"{root_path}/statemask_{step}.pth"
-            if os.path.exists(statemask_path):
+        # Optionally load Masknet for masked-policy evaluation
+        masknet = None
+        if args.masknet_eval:
+            actor_path = f"{root_path}/masknet_actor_{step}.pth"
+            critic_path = f"{root_path}/masknet_critic_{step}.pth"
+            if os.path.exists(actor_path) and os.path.exists(critic_path):
                 feat_dim = 32*32 + conf.Models.WorldModel.TransformerHiddenDim
-                hidden_dim = getattr(conf.Models.StateMask, 'HiddenDim', 128) if hasattr(conf.Models, 'StateMask') else 128
-                statemask = StateMaskGate(feat_dim=feat_dim, hidden_dim=hidden_dim)
-                statemask.load_state_dict(torch.load(statemask_path))
-                device = next(agent.parameters()).device
-                statemask = statemask.to(device)
-                print(colorama.Fore.CYAN + f"Loaded StateMask from {statemask_path}" + colorama.Style.RESET_ALL)
+                masknet = Masknet(
+                    n_actions=2,
+                    input_dims=(feat_dim,),
+                    chkpt_dir=root_path
+                )
+                masknet.actor.load_state_dict(torch.load(actor_path))
+                masknet.critic.load_state_dict(torch.load(critic_path))
+                print(colorama.Fore.CYAN + f"Loaded Masknet from {actor_path} and {critic_path}" + colorama.Style.RESET_ALL)
             else:
-                print(colorama.Fore.YELLOW + f"StateMask checkpoint not found for step {step}; proceeding without mask" + colorama.Style.RESET_ALL)
+                print(colorama.Fore.YELLOW + f"Masknet checkpoint not found for step {step}; proceeding without masknet" + colorama.Style.RESET_ALL)
         # # eval
         episode_avg_return = eval_episodes(
             num_episode=20,
@@ -187,7 +202,7 @@ if __name__ == "__main__":
             world_model=world_model,
             agent=agent,
             eval_seed=args.eval_seed,  # Use command line seed
-            statemask=statemask
+            masknet=masknet
         )
         results.append([step, episode_avg_return])
     

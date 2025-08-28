@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 from einops import rearrange
 import torch
+import torch.distributions as distributions
 import torch.nn as nn
 import torch.nn.functional as F
 from collections import deque
@@ -27,6 +28,7 @@ from sub_models.novelty_detector import WorldModelNoveltyWrapper
 from novelty_injector import NoveltyEnvironmentWrapper, NoveltyInjector, PREDEFINED_NOVELTIES
 from device_utils import get_device, move_to_device, print_device_info, DEVICE
 from statemask_trainer_simple import create_simple_statemask_trainer
+from sub_models.masknet import Masknet
 
 
 def build_single_env(env_name, image_size, seed):
@@ -103,7 +105,10 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
                                   imagine_context_length, imagine_batch_length,
                                   save_every_steps, seed, logger, novelty_config=None,
                                   statemask_trainer=None, statemask_warmup_steps=8000,
-                                  statemask_update_frequency=750):
+                                  statemask_update_frequency=750,
+                                  masknet: Masknet = None,
+                                  masknet_warmup_steps: int = 8000,
+                                  masknet_update_frequency: int = 750):
     # create ckpt dir
     os.makedirs(f"ckpt/{args.n}", exist_ok=True)
 
@@ -122,6 +127,12 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
     if statemask_enabled:
         print(colorama.Fore.CYAN + f"StateMask training enabled with {statemask_warmup_steps} warmup steps" + colorama.Style.RESET_ALL)
         print(colorama.Fore.CYAN + f"StateMask gate updates every {statemask_update_frequency} steps" + colorama.Style.RESET_ALL)
+
+    # Check if Masknet gating is enabled
+    masknet_enabled = masknet is not None
+    if masknet_enabled:
+        print(colorama.Fore.CYAN + f"Masknet gating enabled with {masknet_warmup_steps} warmup steps" + colorama.Style.RESET_ALL)
+        print(colorama.Fore.CYAN + f"Masknet updates every {masknet_update_frequency} steps" + colorama.Style.RESET_ALL)
 
     # reset envs and variables
     sum_reward = np.zeros(num_envs)
@@ -153,11 +164,41 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
                     statemask_for_sampling = statemask_trainer.statemask if use_statemask_for_sampling else None
                     
                     combined_state = torch.cat([prior_flattened_sample, last_dist_feat], dim=-1)
-                    action = agent.sample_as_env_action(
-                        combined_state,
-                        greedy=False,
-                        statemask=statemask_for_sampling
-                    )
+                    
+                    # Default: use agent sampling (optionally with StateMask)
+                    action_tensor = None
+                    masknet_step_cache = None  # cache info for masknet memory
+                    if masknet_enabled and (total_steps * num_envs >= masknet_warmup_steps):
+                        # Agent action distribution
+                        logits = agent.policy(combined_state)
+                        agent_dist = distributions.Categorical(logits=logits)
+                        agent_action = agent_dist.sample()
+                        # Masknet gating decision (use first env)
+                        flat_state = combined_state[0, -1].detach()
+                        flat_state_np = flat_state.float().cpu().numpy()
+                        mask_dist, mask_value = masknet.choose_action(flat_state_np)
+                        mask_action = mask_dist.sample()
+                        # 1 -> pass-through, 0 -> blind with random action
+                        random_action = torch.randint_like(agent_action, 0, logits.shape[-1])
+                        action_tensor = torch.where(mask_action.item() == 1, agent_action, random_action)
+                        # cache for memory append after env step
+                        masknet_step_cache = {
+                            'state': flat_state_np,
+                            'action': int(mask_action.item()),
+                            'log_prob': mask_dist.log_prob(mask_action).detach().cpu().item(),
+                            'value': float(mask_value.squeeze().detach().cpu().item())
+                        }
+                    else:
+                        # Fallback to built-in sampling (optionally with StateMask)
+                        action = agent.sample_as_env_action(
+                            combined_state,
+                            greedy=False,
+                            statemask=statemask_for_sampling
+                        )
+                        action_tensor = torch.tensor(action, device=combined_state.device)
+                    
+                    # Convert action tensor to numpy env action
+                    action = action_tensor.to(torch.int64).detach().cpu().squeeze(-1).numpy()
                     
                     # collect for statemask buffer
                     if statemask_enabled and total_steps * num_envs >= statemask_warmup_steps:
@@ -195,6 +236,18 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
         obs, reward, done, truncated, info = vec_env.step(action)
         replay_buffer.append(current_obs, action, reward, np.logical_or(done, info["life_loss"]))
 
+        # Append Masknet experience (use env 0)
+        if masknet_enabled and ('masknet_step_cache' in locals()) and masknet_step_cache is not None:
+            masknet.remember(
+                state=masknet_step_cache['state'],
+                action=masknet_step_cache['action'],
+                probs=masknet_step_cache['log_prob'],
+                vals=masknet_step_cache['value'],
+                reward=float(reward[0]),
+                done=bool(np.logical_or(done, truncated)[0])
+            )
+            masknet_step_cache = None
+
         done_flag = np.logical_or(done, truncated)
         if done_flag.any():
             for i in range(num_envs):
@@ -229,6 +282,15 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
                 for key, value in statemask_metrics.items():
                     logger.log(key, value)
         # <<< train StateMask part
+        
+        # train Masknet part >>>
+        if masknet_enabled and total_steps * num_envs >= masknet_warmup_steps:
+            if total_steps % (masknet_update_frequency//num_envs) == 0:
+                try:
+                    masknet.learn(num_mask=0)
+                except Exception as e:
+                    print(f"Masknet learn error: {e}")
+        # <<< train Masknet part
         
         # train agent part >>>
         if replay_buffer.ready() and total_steps % (train_agent_every_steps//num_envs) == 0 and total_steps*num_envs >= 0:
@@ -276,6 +338,11 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
             if statemask_enabled:
                 torch.save(statemask_trainer.statemask.state_dict(), f"ckpt/{args.n}/statemask_{total_steps}.pth")
                 print(colorama.Fore.CYAN + f"Saved StateMask model" + colorama.Style.RESET_ALL)
+            # Save Masknet if enabled
+            if masknet_enabled:
+                torch.save(masknet.actor.state_dict(), f"ckpt/{args.n}/masknet_actor_{total_steps}.pth")
+                torch.save(masknet.critic.state_dict(), f"ckpt/{args.n}/masknet_critic_{total_steps}.pth")
+                print(colorama.Fore.CYAN + f"Saved Masknet model" + colorama.Style.RESET_ALL)
             
             # Save novelty detection logs if enabled
             if novelty_detection_enabled:
@@ -373,21 +440,23 @@ if __name__ == "__main__":
         
         # Create StateMask trainer if enabled
         statemask_trainer = None
+        masknet = None
         if hasattr(conf.Models, 'StateMask') and getattr(conf.Models.StateMask, 'Enabled', False):
             feat_dim = 32*32 + conf.Models.WorldModel.TransformerHiddenDim
-            statemask_config = {
-                'hidden_dim': getattr(conf.Models.StateMask, 'HiddenDim', 128),
-                'lr': getattr(conf.Models.StateMask, 'LR', 1e-4),
-                'sparsity_weight': getattr(conf.Models.StateMask, 'SparsityWeight', 0.1),
-                'target_sparsity': getattr(conf.Models.StateMask, 'TargetSparsity', 0.3)
-            }
-            statemask, statemask_trainer = create_simple_statemask_trainer(
-                feat_dim, 
-                agent.value,  # Pass agent's value function
-                statemask_config
+            # Initialize Masknet as the new gating mechanism (binary decision)
+            masknet = Masknet(
+                n_actions=2,
+                input_dims=(feat_dim,),
+                gamma=0.99,
+                alpha=3e-4,
+                beta=1e-3,
+                gae_lambda=0.95,
+                policy_clip=0.2,
+                batch_size=64,
+                n_epochs=4,
+                chkpt_dir=f"ckpt/{args.n}"
             )
-            statemask = move_to_device(statemask)
-            print(colorama.Fore.CYAN + f"StateMask trainer created with target sparsity: {statemask_config['target_sparsity']}" + colorama.Style.RESET_ALL)
+            print(colorama.Fore.CYAN + f"Masknet created for feat_dim={feat_dim}" + colorama.Style.RESET_ALL)
 
         # build replay buffer
         replay_buffer = ReplayBuffer(
@@ -445,7 +514,10 @@ if __name__ == "__main__":
             novelty_config=novelty_config,
             statemask_trainer=statemask_trainer,
             statemask_warmup_steps=getattr(conf.Models.StateMask, 'WarmupSteps', 8000) if hasattr(conf.Models, 'StateMask') else 8000,
-            statemask_update_frequency=getattr(conf.Models.StateMask, 'TrainFrequency', 750) if hasattr(conf.Models, 'StateMask') else 750
+            statemask_update_frequency=getattr(conf.Models.StateMask, 'TrainFrequency', 750) if hasattr(conf.Models, 'StateMask') else 750,
+            masknet=masknet,
+            masknet_warmup_steps=getattr(conf.Models.StateMask, 'WarmupSteps', 8000) if hasattr(conf.Models, 'StateMask') else 8000,
+            masknet_update_frequency=getattr(conf.Models.StateMask, 'TrainFrequency', 750) if hasattr(conf.Models, 'StateMask') else 750
         )
     else:
         raise NotImplementedError(f"Task {conf.Task} not implemented")
