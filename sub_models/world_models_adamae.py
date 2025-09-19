@@ -320,10 +320,11 @@ class WorldModel(nn.Module):
         )
         self.sampler_norm1 = nn.LayerNorm(self.token_dim)
         self.sampler_norm2 = nn.LayerNorm(self.token_dim)
+        # produce a scalar logit per token
         self.sampler_head = nn.Sequential(
             nn.Linear(self.token_dim, self.token_dim // 2),
             nn.ReLU(inplace=True),
-            nn.Linear(self.token_dim // 2, self.token_dim),
+            nn.Linear(self.token_dim // 2, 1),
         )
     # adamae specific parameters end
 
