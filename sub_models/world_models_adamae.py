@@ -595,5 +595,6 @@ class WorldModel(nn.Module):
             logger.log("WorldModel/dynamics_real_kl_div", dynamics_real_kl_div.item())
             logger.log("WorldModel/representation_loss", representation_loss.item())
             logger.log("WorldModel/representation_real_kl_div", representation_real_kl_div.item())
-            logger.log("WorldModel/adaptive_sampling_loss", L_S.item())
+            logger.log("WorldModel/adaptive_sampling_loss", float(L_S.detach()))
+            logger.log("WorldModel/adaptive_sampling_loss_weighted", float((1e-4 * L_S).detach()))
             logger.log("WorldModel/total_loss", total_loss.item())
