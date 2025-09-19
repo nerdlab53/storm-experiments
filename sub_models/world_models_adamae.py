@@ -599,3 +599,4 @@ class WorldModel(nn.Module):
             logger.log("WorldModel/adaptive_sampling_loss", float(L_S.detach()))
             logger.log("WorldModel/adaptive_sampling_loss_weighted", float((1e-4 * L_S).detach()))
             logger.log("WorldModel/total_loss", total_loss.item())
+        # finish
