@@ -141,8 +141,8 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
             agent.eval()
             with torch.no_grad():
                 if len(context_action) == 0:
-                    # Ensure a vector of actions with length num_envs
-                    action = np.array([vec_env.single_action_space.sample() for _ in range(num_envs)], dtype=np.int64)
+                    # Sample batched actions from vectorized space
+                    action = vec_env.action_space.sample()
                 else:
                     # get posterior logits
                     context_latent = world_model.encode_obs(torch.cat(list(context_obs), dim=1))
@@ -178,15 +178,14 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
                             'value': float(mask_value.squeeze().detach().cpu().item())
                         }
                     else:
-                        # Fallback to built-in sampling (optionally with StateMask)
-                        action = agent.sample_as_env_action(
+                        # Fallback to built-in sampling
+                        action_tensor = agent.sample(
                             combined_state,
                             greedy=False
                         )
-                        action_tensor = torch.tensor(action, device=combined_state.device)
                     
-                    # Convert action tensor to numpy env action
-                    action = action_tensor.to(torch.int64).detach().cpu().squeeze(-1).numpy()
+                    # Convert action tensor to numpy env action (ensure shape [num_envs])
+                    action = action_tensor.to(torch.int64).detach().cpu().reshape(-1).numpy()
                     
                     # StateMask removed
                     
@@ -218,7 +217,20 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
             context_action.append(action)
         else:
             # Warmup: take random actions for all envs
-            action = np.array([vec_env.single_action_space.sample() for _ in range(num_envs)], dtype=np.int64)
+            action = vec_env.action_space.sample()
+
+        # Normalize actions to 1D np.int64 array of length num_envs
+        if not isinstance(action, np.ndarray):
+            action = np.array(action, dtype=np.int64)
+        if action.ndim == 0:
+            action = np.full((num_envs,), int(action), dtype=np.int64)
+        elif action.ndim > 1:
+            action = action.reshape(-1).astype(np.int64)
+        if action.shape[0] != num_envs:
+            if action.shape[0] == 1:
+                action = np.full((num_envs,), int(action[0]), dtype=np.int64)
+            else:
+                action = action[:num_envs].astype(np.int64)
 
         obs, reward, done, truncated, info = vec_env.step(action)
         replay_buffer.append(current_obs, action, reward, np.logical_or(done, info["life_loss"]))
