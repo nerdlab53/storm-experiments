@@ -141,7 +141,8 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
             agent.eval()
             with torch.no_grad():
                 if len(context_action) == 0:
-                    action = vec_env.action_space.sample()
+                    # Ensure a vector of actions with length num_envs
+                    action = np.array([vec_env.single_action_space.sample() for _ in range(num_envs)], dtype=np.int64)
                 else:
                     # get posterior logits
                     context_latent = world_model.encode_obs(torch.cat(list(context_obs), dim=1))
@@ -216,7 +217,8 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
             context_obs.append(rearrange(move_to_device(torch.Tensor(current_obs)), "B H W C -> B 1 C H W")/255)
             context_action.append(action)
         else:
-            action = vec_env.action_space.sample()
+            # Warmup: take random actions for all envs
+            action = np.array([vec_env.single_action_space.sample() for _ in range(num_envs)], dtype=np.int64)
 
         obs, reward, done, truncated, info = vec_env.step(action)
         replay_buffer.append(current_obs, action, reward, np.logical_or(done, info["life_loss"]))
