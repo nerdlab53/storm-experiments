@@ -510,7 +510,7 @@ class WorldModel(nn.Module):
         # imagine
         for i in range(imagine_batch_length):
             current_state = torch.cat([self.latent_buffer[:, i:i+1], self.hidden_buffer[:, i:i+1]], dim=-1)
-            action = agent.sample(current_state, statemask=statemask)
+            action = agent.sample(current_state)
             self.action_buffer[:, i:i+1] = action
 
             last_obs_hat, last_reward_hat, last_termination_hat, last_latent, last_dist_feat = self.predict_next(
