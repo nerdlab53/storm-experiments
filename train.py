@@ -28,7 +28,6 @@ from sub_models.world_models_adamae import WorldModel as AdamaeWorldModel
 from sub_models.novelty_detector import WorldModelNoveltyWrapper
 from novelty_injector import NoveltyEnvironmentWrapper, NoveltyInjector, PREDEFINED_NOVELTIES
 from device_utils import get_device, move_to_device, print_device_info, DEVICE
-from statemask_trainer_simple import create_simple_statemask_trainer
 from sub_models.masknet import Masknet
 
 
@@ -75,7 +74,7 @@ def world_model_imagine_data(replay_buffer: ReplayBuffer,
                              world_model: WorldModel, agent: agents.ActorCriticAgent,
                              imagine_batch_size, imagine_demonstration_batch_size,
                              imagine_context_length, imagine_batch_length,
-                             log_video, logger, statemask=None):
+                             log_video, logger):
     '''
     Sample context from replay buffer, then imagine data with world model and agent
     '''
@@ -91,25 +90,22 @@ def world_model_imagine_data(replay_buffer: ReplayBuffer,
         imagine_batch_size=imagine_batch_size+imagine_demonstration_batch_size,
         imagine_batch_length=imagine_batch_length,
         log_video=log_video,
-        logger=logger,
-        statemask=statemask
+        logger=logger
     )
     return latent, action, None, None, reward_hat, termination_hat
 
 
 def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
-                                  replay_buffer: ReplayBuffer,
-                                  world_model: WorldModel, agent: agents.ActorCriticAgent,
-                                  train_dynamics_every_steps, train_agent_every_steps,
-                                  batch_size, demonstration_batch_size, batch_length,
-                                  imagine_batch_size, imagine_demonstration_batch_size,
-                                  imagine_context_length, imagine_batch_length,
-                                  save_every_steps, seed, logger, novelty_config=None,
-                                  statemask_trainer=None, statemask_warmup_steps=8000,
-                                  statemask_update_frequency=750,
-                                  masknet: Masknet = None,
-                                  masknet_warmup_steps: int = 8000,
-                                  masknet_update_frequency: int = 750):
+                                 replay_buffer: ReplayBuffer,
+                                 world_model: WorldModel, agent: agents.ActorCriticAgent,
+                                 train_dynamics_every_steps, train_agent_every_steps,
+                                 batch_size, demonstration_batch_size, batch_length,
+                                 imagine_batch_size, imagine_demonstration_batch_size,
+                                 imagine_context_length, imagine_batch_length,
+                                 save_every_steps, seed, logger, novelty_config=None,
+                                 masknet: Masknet = None,
+                                 masknet_warmup_steps: int = 8000,
+                                 masknet_update_frequency: int = 750):
     # create ckpt dir
     os.makedirs(f"ckpt/{args.n}", exist_ok=True)
 
@@ -123,11 +119,7 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
     if novelty_detection_enabled:
         print(colorama.Fore.CYAN + "Novelty detection enabled during training" + colorama.Style.RESET_ALL)
     
-    # Check if StateMask training is enabled
-    statemask_enabled = statemask_trainer is not None
-    if statemask_enabled:
-        print(colorama.Fore.CYAN + f"StateMask training enabled with {statemask_warmup_steps} warmup steps" + colorama.Style.RESET_ALL)
-        print(colorama.Fore.CYAN + f"StateMask gate updates every {statemask_update_frequency} steps" + colorama.Style.RESET_ALL)
+    # StateMask removed
 
     # Check if Masknet gating is enabled
     masknet_enabled = masknet is not None
@@ -159,11 +151,6 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
                     # last_dist_feat -> sequential info from the transformer containing imp information such as dynamics etc. basically which led to the logits
                     prior_flattened_sample, last_dist_feat = world_model.calc_last_dist_feat(context_latent, model_context_action)
                     
-                    # check if statemask ready to train
-                    use_statemask_for_sampling = (statemask_enabled and 
-                                                 total_steps * num_envs >= statemask_warmup_steps)
-                    statemask_for_sampling = statemask_trainer.statemask if use_statemask_for_sampling else None
-                    
                     combined_state = torch.cat([prior_flattened_sample, last_dist_feat], dim=-1)
                     
                     # Default: use agent sampling (optionally with StateMask)
@@ -193,17 +180,14 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
                         # Fallback to built-in sampling (optionally with StateMask)
                         action = agent.sample_as_env_action(
                             combined_state,
-                            greedy=False,
-                            statemask=statemask_for_sampling
+                            greedy=False
                         )
                         action_tensor = torch.tensor(action, device=combined_state.device)
                     
                     # Convert action tensor to numpy env action
                     action = action_tensor.to(torch.int64).detach().cpu().squeeze(-1).numpy()
                     
-                    # collect for statemask buffer
-                    if statemask_enabled and total_steps * num_envs >= statemask_warmup_steps:
-                        statemask_trainer.collect_experience(combined_state)
+                    # StateMask removed
                     
                     # check if novelty detection enabled and then perform
                     if novelty_detection_enabled and len(context_obs) > 0:
@@ -276,13 +260,7 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
             )
         # <<< train world model part
 
-        # train StateMask part >>>
-        if statemask_enabled and total_steps * num_envs >= statemask_warmup_steps:
-            if total_steps % (statemask_update_frequency//num_envs) == 0:
-                statemask_metrics = statemask_trainer.train_step()
-                for key, value in statemask_metrics.items():
-                    logger.log(key, value)
-        # <<< train StateMask part
+        # StateMask removed
         
         # train Masknet part >>>
         if masknet_enabled and total_steps * num_envs >= masknet_warmup_steps:
@@ -302,10 +280,6 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
             else:
                 log_video = False
 
-            # Use StateMask for imagination only after warmup and if enabled
-            use_statemask_for_imagination = (statemask_enabled and 
-                                           total_steps * num_envs >= statemask_warmup_steps)
-            
             imagine_latent, agent_action, agent_logprob, agent_value, imagine_reward, imagine_termination = world_model_imagine_data(
                 replay_buffer=replay_buffer,
                 world_model=world_model,
@@ -315,8 +289,7 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
                 imagine_context_length=imagine_context_length,
                 imagine_batch_length=imagine_batch_length,
                 log_video=log_video,
-                logger=logger,
-                statemask=statemask_trainer.statemask if use_statemask_for_imagination else None
+                logger=logger
             )
             agent.update(
                 latent=imagine_latent,
@@ -335,10 +308,7 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
             torch.save(world_model.state_dict(), f"ckpt/{args.n}/world_model_{total_steps}.pth")
             torch.save(agent.state_dict(), f"ckpt/{args.n}/agent_{total_steps}.pth")
             
-            # Save StateMask if enabled
-            if statemask_enabled:
-                torch.save(statemask_trainer.statemask.state_dict(), f"ckpt/{args.n}/statemask_{total_steps}.pth")
-                print(colorama.Fore.CYAN + f"Saved StateMask model" + colorama.Style.RESET_ALL)
+            # StateMask removed
             # Save Masknet if enabled
             if masknet_enabled:
                 torch.save(masknet.actor.state_dict(), f"ckpt/{args.n}/masknet_actor_{total_steps}.pth")
@@ -478,25 +448,8 @@ if __name__ == "__main__":
         world_model = build_world_model(conf, action_dim, impl=args.world_model_impl)
         agent = build_agent(conf, action_dim)
         
-        # Create StateMask trainer if enabled
-        statemask_trainer = None
+        # StateMask removed
         masknet = None
-        if hasattr(conf.Models, 'StateMask') and getattr(conf.Models.StateMask, 'Enabled', False):
-            feat_dim = 32*32 + conf.Models.WorldModel.TransformerHiddenDim
-            # Initialize Masknet as the new gating mechanism (binary decision)
-            masknet = Masknet(
-                n_actions=2,
-                input_dims=(feat_dim,),
-                gamma=0.99,
-                alpha=3e-4,
-                beta=1e-3,
-                gae_lambda=0.95,
-                policy_clip=0.2,
-                batch_size=64,
-                n_epochs=4,
-                chkpt_dir=f"ckpt/{args.n}"
-            )
-            print(colorama.Fore.CYAN + f"Masknet created for feat_dim={feat_dim}" + colorama.Style.RESET_ALL)
 
         # build replay buffer
         replay_buffer = ReplayBuffer(
@@ -552,9 +505,6 @@ if __name__ == "__main__":
             seed=args.seed,
             logger=logger,
             novelty_config=novelty_config,
-            statemask_trainer=statemask_trainer,
-            statemask_warmup_steps=getattr(conf.Models.StateMask, 'WarmupSteps', 8000) if hasattr(conf.Models, 'StateMask') else 8000,
-            statemask_update_frequency=getattr(conf.Models.StateMask, 'TrainFrequency', 750) if hasattr(conf.Models, 'StateMask') else 750,
             masknet=masknet,
             masknet_warmup_steps=getattr(conf.Models.StateMask, 'WarmupSteps', 8000) if hasattr(conf.Models, 'StateMask') else 8000,
             masknet_update_frequency=getattr(conf.Models.StateMask, 'TrainFrequency', 750) if hasattr(conf.Models, 'StateMask') else 750
