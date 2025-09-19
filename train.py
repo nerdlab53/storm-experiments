@@ -23,7 +23,9 @@ from replay_buffer import ReplayBuffer
 import env_wrapper
 import agents
 from sub_models.functions_losses import symexp
-from sub_models.world_models import WorldModel, MSELoss
+from sub_models import WorldModel
+from sub_models.world_models import WorldModel as DefaultWorldModel, MSELoss
+from sub_models.world_models_adamae import WorldModel as AdamaeWorldModel
 from sub_models.novelty_detector import WorldModelNoveltyWrapper
 from novelty_injector import NoveltyEnvironmentWrapper, NoveltyInjector, PREDEFINED_NOVELTIES
 from device_utils import get_device, move_to_device, print_device_info, DEVICE
@@ -351,8 +353,9 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
                 print(colorama.Fore.CYAN + f"Saved novelty detection log to {log_path}" + colorama.Style.RESET_ALL)
 
 
-def build_world_model(conf, action_dim):
-    world_model = move_to_device(WorldModel(
+def build_world_model(conf, action_dim, impl: str = "default"):
+    model_cls = AdamaeWorldModel if impl == "adamae" else DefaultWorldModel
+    world_model = move_to_device(model_cls(
         in_channels=conf.Models.WorldModel.InChannels,
         action_dim=action_dim,
         transformer_max_length=conf.Models.WorldModel.TransformerMaxLength,
@@ -414,6 +417,17 @@ if __name__ == "__main__":
     parser.add_argument("-config_path", type=str, required=True)
     parser.add_argument("-env_name", type=str, required=True)
     parser.add_argument("-trajectory_path", type=str, required=True)
+    # World model implementation selector
+    parser.add_argument("--world_model_impl", type=str, default="default", choices=["default", "adamae"],
+                        help="Choose world model implementation: 'default' or 'adamae'")
+    # Optional Weights & Biases logging (sync existing TensorBoard logs)
+    parser.add_argument("--wandb_project", type=str, default=None)
+    parser.add_argument("--wandb_entity", type=str, default=None)
+    parser.add_argument("--wandb_group", type=str, default=None)
+    parser.add_argument("--wandb_name", type=str, default=None)
+    parser.add_argument("--wandb_mode", type=str, default=None, choices=[None, "online", "offline", "disabled"],
+                        help="Wandb mode; if not set, follows wandb defaults")
+    parser.add_argument("--wandb_tags", nargs='*', default=None)
     args = parser.parse_args()
     conf = load_config(args.config_path)
     print(colorama.Fore.RED + str(args) + colorama.Style.RESET_ALL)
@@ -425,6 +439,33 @@ if __name__ == "__main__":
     seed_np_torch(seed=args.seed)
     # tensorboard writer
     logger = Logger(path=f"runs/{args.n}")
+    # Optional: initialize Weights & Biases to sync TensorBoard logs "as is"
+    if args.wandb_project is not None:
+        try:
+            import wandb
+            wandb_kwargs = {
+                "project": args.wandb_project,
+                "name": args.wandb_name or args.n,
+                "group": args.wandb_group,
+                "entity": args.wandb_entity,
+                "mode": args.wandb_mode,
+                "tags": args.wandb_tags,
+                "config": {
+                    "seed": args.seed,
+                    "env_name": args.env_name,
+                    "config_path": args.config_path,
+                    "trajectory_path": args.trajectory_path,
+                    "world_model_impl": args.world_model_impl,
+                },
+                "sync_tensorboard": True,
+                # Keep wandb files inside the run directory
+                "dir": os.path.abspath(f"runs/{args.n}")
+            }
+            # Remove None values to avoid wandb complaining
+            wandb_kwargs = {k: v for k, v in wandb_kwargs.items() if v is not None}
+            wandb.init(**wandb_kwargs)
+        except Exception as e:
+            print(colorama.Fore.YELLOW + f"Wandb init skipped due to error: {e}" + colorama.Style.RESET_ALL)
     # copy config file
     shutil.copy(args.config_path, f"runs/{args.n}/config.yaml")
 
@@ -435,7 +476,7 @@ if __name__ == "__main__":
         action_dim = dummy_env.action_space.n
 
         # build world model and agent
-        world_model = build_world_model(conf, action_dim)
+        world_model = build_world_model(conf, action_dim, impl=args.world_model_impl)
         agent = build_agent(conf, action_dim)
         
         # Create StateMask trainer if enabled

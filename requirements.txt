@@ -11,3 +11,4 @@ scipy
 tqdm
 opencv-python
 gymnasium[atari,accept-rom-license] == 0.29.1
+wandb
