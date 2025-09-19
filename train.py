@@ -1,7 +1,6 @@
 import gymnasium
 import argparse
 from tensorboardX import SummaryWriter
-import cv2
 import numpy as np
 from einops import rearrange
 import torch
@@ -9,14 +8,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from collections import deque
 from tqdm import tqdm
-import copy
 import colorama
-import random
-import json
 import shutil
-import pickle
 import os
-
 from utils import seed_np_torch, Logger, load_config
 from replay_buffer import ReplayBuffer
 import env_wrapper
@@ -24,9 +18,7 @@ import agents
 from sub_models.functions_losses import symexp
 from sub_models.world_models import WorldModel, MSELoss
 from sub_models.world_models_adamae import WorldModel as AdaMAESTORM
-from sub_models.novelty_detector import WorldModelNoveltyWrapper
-from novelty_injector import NoveltyEnvironmentWrapper, NoveltyInjector, PREDEFINED_NOVELTIES
-from device_utils import get_device, move_to_device, print_device_info, DEVICE
+from device_utils import move_to_device, print_device_info
 
 
 def build_single_env(env_name, image_size, seed):
@@ -38,24 +30,12 @@ def build_single_env(env_name, image_size, seed):
     return env
 
 
-def build_vec_env(env_name, image_size, num_envs, seed, novelty_config=None):
+def build_vec_env(env_name, image_size, num_envs, seed):
     # lambda pitfall refs to: https://python.plainenglish.io/python-pitfalls-with-variable-capture-dcfc113f39b7
-    def lambda_generator(env_name, image_size, novelty_config):
-        def make_env():
-            base_env = build_single_env(env_name, image_size, seed)
-            if novelty_config and novelty_config.get('Enabled', False):
-                env = NoveltyEnvironmentWrapper(base_env)
-                # Configure novelty injection
-                env.configure_novelty(
-                    novelty_config['NoveltyType'],
-                    novelty_config['NoveltyParams'],
-                    novelty_config['NoveltyStartStep']
-                )
-                return env
-            return base_env
-        return make_env
-    
-    env_fns = [lambda_generator(env_name, image_size, novelty_config) for i in range(num_envs)]
+    def lambda_generator(env_name, image_size):
+        return lambda : build_single_env(env_name, image_size, seed)
+    env_fns = []
+    env_fns = [lambda_generator(env_name, image_size) for i in range(num_envs)]
     vec_env = gymnasium.vector.AsyncVectorEnv(env_fns=env_fns)
     return vec_env
 
@@ -100,26 +80,19 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
                                   batch_size, demonstration_batch_size, batch_length,
                                   imagine_batch_size, imagine_demonstration_batch_size,
                                   imagine_context_length, imagine_batch_length,
-                                  save_every_steps, seed, logger, novelty_config=None):
+                                  save_every_steps, seed, logger):
     # create ckpt dir
     os.makedirs(f"ckpt/{args.n}", exist_ok=True)
 
     # build vec env, not useful in the Atari100k setting
     # but when the max_steps is large, you can use parallel envs to speed up
-    vec_env = build_vec_env(env_name, image_size, num_envs=num_envs, seed=seed, novelty_config=novelty_config)
+    vec_env = build_vec_env(env_name, image_size, num_envs=num_envs, seed=seed)
     print("Current env: " + colorama.Fore.YELLOW + f"{env_name}" + colorama.Style.RESET_ALL)
-    
-    # Check if novelty detection is enabled
-    novelty_detection_enabled = hasattr(world_model, 'novelty_detector')
-    if novelty_detection_enabled:
-        print(colorama.Fore.CYAN + "Novelty detection enabled during training" + colorama.Style.RESET_ALL)
-
     # reset envs and variables
     sum_reward = np.zeros(num_envs)
     current_obs, current_info = vec_env.reset()
     context_obs = deque(maxlen=16)
     context_action = deque(maxlen=16)
-
     # sample and train
     for total_steps in tqdm(range(max_steps//num_envs)):
         # sample part >>>
@@ -140,32 +113,7 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
                     action = agent.sample_as_env_action(
                         torch.cat([prior_flattened_sample, last_dist_feat], dim=-1),
                         greedy=False
-                    )
-                    
-                    # check if novelty detection enabled and then perform
-                    if novelty_detection_enabled and len(context_obs) > 0:
-                        try:
-                            is_novelty, detection_info = world_model.detect_novelty_step(
-                                context_obs[-1],  # the current obeservation
-                                move_to_device(torch.tensor([action[0]])),  # current action (first env)
-                                last_dist_feat,  # latent context from transformer
-                                total_steps * num_envs
-                            )
-                            
-                            if is_novelty:
-                                # print(colorama.Fore.RED + f"NOVELTY DETECTED at step {total_steps * num_envs}!" + colorama.Style.RESET_ALL), if needed, otherwise we'll check the logs only
-                                logger.log("novelty_detection/detection_flag", 1.0)
-                            else:
-                                logger.log("novelty_detection/detection_flag", 0.0)
-                            
-                            # Log detection metrics
-                            logger.log("novelty_detection/kl_difference", detection_info.get('kl_difference', 0.0))
-                            logger.log("novelty_detection/expected_info_gain", detection_info.get('expected_info_gain', 0.0))
-                            logger.log("novelty_detection/threshold", detection_info.get('threshold', 0.0))
-                            logger.log("novelty_detection/detection_rate", detection_info.get('detection_rate', 0.0))
-                        except Exception as e:
-                            print(f"Novelty detection error: {e}")
-
+                    )        
             context_obs.append(rearrange(move_to_device(torch.Tensor(current_obs)), "B H W C -> B 1 C H W")/255)
             context_action.append(action)
         else:
@@ -237,15 +185,11 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
             torch.save(world_model.state_dict(), f"ckpt/{args.n}/world_model_{total_steps}.pth")
             torch.save(agent.state_dict(), f"ckpt/{args.n}/agent_{total_steps}.pth")
             
-            # Save novelty detection logs if enabled
-            if novelty_detection_enabled:
-                log_path = f"ckpt/{args.n}/novelty_detection_{total_steps}.json"
-                world_model.save_detection_log(log_path)
-                print(colorama.Fore.CYAN + f"Saved novelty detection log to {log_path}" + colorama.Style.RESET_ALL)
 
-
-def build_world_model(conf, action_dim):
-    world_model = move_to_device(WorldModel(
+def build_world_model(conf, action_dim, use_adamae=False):
+    model_cls = AdaMAESTORM if use_adamae else WorldModel
+    print(colorama.Fore.CYAN + f"Using {'AdaMAEStorm' if use_adamae else 'STORM'} world model" + colorama.Style.RESET_ALL)
+    world_model = move_to_device(model_cls(
         in_channels=conf.Models.WorldModel.InChannels,
         action_dim=action_dim,
         transformer_max_length=conf.Models.WorldModel.TransformerMaxLength,
@@ -259,24 +203,6 @@ def build_world_model(conf, action_dim):
         use_random_mask=getattr(conf.Models.WorldModel, 'UseRandomMask', False),
         use_soft_penalty=getattr(conf.Models.WorldModel, 'UseSoftPenalty', True)
     ))
-    
-    # Add novelty detection if enabled
-    if hasattr(conf.Models, 'NoveltyDetection') and getattr(conf.Models.NoveltyDetection, 'Enabled', False):
-        print(colorama.Fore.CYAN + "Enabling novelty detection..." + colorama.Style.RESET_ALL)
-        world_model = WorldModelNoveltyWrapper(
-            world_model,
-            history_length=getattr(conf.Models.NoveltyDetection, 'HistoryLength', 100),
-            detection_threshold_percentile=getattr(conf.Models.NoveltyDetection, 'DetectionThresholdPercentile', 95.0),
-            min_samples_for_detection=getattr(conf.Models.NoveltyDetection, 'MinSamplesForDetection', 50),
-            enable_adaptive_threshold=getattr(conf.Models.NoveltyDetection, 'EnableAdaptiveThreshold', True),
-            eig_threshold=getattr(conf.Models.NoveltyDetection, 'EIGThreshold', 0.0),
-            use_eig_primary=getattr(conf.Models.NoveltyDetection, 'UseEIGPrimary', True)
-        )
-        
-        # Create detection log directory
-        log_path = getattr(conf.Models.NoveltyDetection, 'DetectionLogPath', 'detection_logs/')
-        os.makedirs(log_path, exist_ok=True)
-    
     return world_model
 
 
@@ -306,6 +232,7 @@ if __name__ == "__main__":
     parser.add_argument("-config_path", type=str, required=True)
     parser.add_argument("-env_name", type=str, required=True)
     parser.add_argument("-trajectory_path", type=str, required=True)
+    parser.add_argument("--use_adamae", action="store_true", help="Use AdaMAEStorm world model")
     args = parser.parse_args()
     conf = load_config(args.config_path)
     print(colorama.Fore.RED + str(args) + colorama.Style.RESET_ALL)
@@ -327,7 +254,7 @@ if __name__ == "__main__":
         action_dim = dummy_env.action_space.n
 
         # build world model and agent
-        world_model = build_world_model(conf, action_dim)
+        world_model = build_world_model(conf, action_dim, use_adamae=args.use_adamae)
         agent = build_agent(conf, action_dim)
 
         # build replay buffer
@@ -343,24 +270,6 @@ if __name__ == "__main__":
         if conf.JointTrainAgent.UseDemonstration:
             print(colorama.Fore.MAGENTA + f"loading demonstration trajectory from {args.trajectory_path}" + colorama.Style.RESET_ALL)
             replay_buffer.load_trajectory(path=args.trajectory_path)
-
-        # Get novelty testing configuration if available
-        novelty_config = None
-        if hasattr(conf, 'NoveltyTesting'):
-            # Convert YACS NoveltyParams to dictionary
-            novelty_params_dict = {}
-            if hasattr(conf.NoveltyTesting, 'NoveltyParams'):
-                for key in conf.NoveltyTesting.NoveltyParams:
-                    novelty_params_dict[key] = getattr(conf.NoveltyTesting.NoveltyParams, key)
-            
-            novelty_config = {
-                'Enabled': getattr(conf.NoveltyTesting, 'Enabled', False),
-                'NoveltyType': getattr(conf.NoveltyTesting, 'NoveltyType', 'visual_noise'),
-                'NoveltyParams': novelty_params_dict,
-                'NoveltyStartStep': getattr(conf.NoveltyTesting, 'NoveltyStartStep', 100)
-            }
-            if novelty_config['Enabled']:
-                print(colorama.Fore.MAGENTA + f"Novelty testing enabled: {novelty_config['NoveltyType']} starting at step {novelty_config['NoveltyStartStep']}" + colorama.Style.RESET_ALL)
 
         # train
         joint_train_world_model_agent(
@@ -383,7 +292,6 @@ if __name__ == "__main__":
             save_every_steps=conf.JointTrainAgent.SaveEverySteps,
             seed=args.seed,
             logger=logger,
-            novelty_config=novelty_config
         )
     else:
         raise NotImplementedError(f"Task {conf.Task} not implemented")
