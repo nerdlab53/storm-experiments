@@ -23,8 +23,7 @@ from replay_buffer import ReplayBuffer
 import env_wrapper
 import agents
 from sub_models.functions_losses import symexp
-from sub_models import WorldModel
-from sub_models.world_models import WorldModel as DefaultWorldModel, MSELoss
+from sub_models.world_models import WorldModel, MSELoss
 from sub_models.world_models_adamae import WorldModel as AdamaeWorldModel
 from sub_models.novelty_detector import WorldModelNoveltyWrapper
 from novelty_injector import NoveltyEnvironmentWrapper, NoveltyInjector, PREDEFINED_NOVELTIES
@@ -354,7 +353,7 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
 
 
 def build_world_model(conf, action_dim, impl: str = "default"):
-    model_cls = AdamaeWorldModel if impl == "adamae" else DefaultWorldModel
+    model_cls = AdamaeWorldModel if impl == "adamae" else WorldModel
     world_model = move_to_device(model_cls(
         in_channels=conf.Models.WorldModel.InChannels,
         action_dim=action_dim,
