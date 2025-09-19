@@ -206,7 +206,14 @@ class MultiHeadAttentionProgressive(nn.Module):
         q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
 
         if mask is not None:
-            mask = mask.unsqueeze(1)   # For head axis broadcasting.
+            # Support both [B, L, L] and [B or 1, n_head, L, L]
+            if mask.dim() == 3:
+                mask = mask.unsqueeze(1)   # [B, 1, L, L] - broadcast across heads
+            elif mask.dim() == 4:
+                # Assume mask is already [B or 1, n_head, L, L]
+                pass
+            else:
+                raise ValueError(f"Unsupported mask shape {tuple(mask.shape)}; expected 3D or 4D")
 
         # Choose appropriate attention mechanism based on mask type
         if self._is_progressive_mask(mask):
@@ -223,6 +230,40 @@ class MultiHeadAttentionProgressive(nn.Module):
         q = self.layer_norm(q)
 
         return q, attn
+
+
+def get_per_head_fixed_mask_causal(batch_length, mask_percents, flag, soft, device, soft_penalty=-1.0):
+    """
+    Create a per-head causal mask with optional fixed-percentage masking for each head.
+
+    Returns a float mask of shape [1, n_head, L, L]. Valid (unmasked) positions are 0.0,
+    masked positions are either -inf (hard) or soft_penalty (soft). Lower triangle (causal)
+    is allowed by default, then additional tokens are masked per head according to mask_percents.
+    """
+    n_head = len(mask_percents)
+    mask = torch.full((1, n_head, batch_length, batch_length), float('-inf'), device=device)
+    indices = torch.tril_indices(batch_length, batch_length, offset=0, device=device)
+    mask[:, :, indices[0], indices[1]] = 0.0
+
+    for h, percent in enumerate(mask_percents):
+        if percent <= 0.0:
+            continue
+        for i in range(1, batch_length):
+            idx = torch.arange(0, i, device=device)
+            if len(idx) == 0:
+                continue
+            num_tokens = min(int(len(idx) * percent), len(idx))
+            if num_tokens <= 0:
+                continue
+            if not flag:
+                to_mask = idx[:num_tokens]
+            else:
+                to_mask = idx[torch.randperm(len(idx), device=device)[:num_tokens]]
+            if soft:
+                mask[0, h, i, to_mask] = soft_penalty
+            else:
+                mask[0, h, i, to_mask] = float('-inf')
+    return mask
 
 
 class PositionwiseFeedForward(nn.Module):
