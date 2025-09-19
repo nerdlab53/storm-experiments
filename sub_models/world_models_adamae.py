@@ -312,7 +312,7 @@ class WorldModel(nn.Module):
         self.token_dim = self.encoder.last_channels
         self.mask_ratio = 0.75 # the masking percentage for the sampler
         self.spatial_pos = nn.Embedding(self.num_tokens_per_frame, self.token_dim)
-        self.sampler_mha = nn.MultiHeadAttention(self.token_dim, num_heads=4, batch_first=True)
+        self.sampler_mha = nn.MultiheadAttention(self.token_dim, num_heads=4, batch_first=True)
         self.sampler_ffn = nn.Sequential(
             nn.Linear(self.token_dim, self.token_dim * 2),
             nn.ReLU(inplace=True),
