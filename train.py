@@ -246,7 +246,7 @@ if __name__ == "__main__":
     # Initialize Weights & Biases (optional if WANDB_DISABLED=1)
     wandb_mode = os.environ.get("WANDB_MODE", "online")
     try:
-        wandb.init(project=os.environ.get("WANDB_PROJECT", "storm"),
+        wandb.init(project=os.environ.get("WANDB_PROJECT", "STORM-exps"),
                    name=args.n,
                    config={},
                    mode=wandb_mode)
