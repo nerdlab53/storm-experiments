@@ -122,6 +122,7 @@ if __name__ == "__main__":
     parser.add_argument("-env_name", type=str, required=True)
     parser.add_argument("-run_name", type=str, required=True)
     parser.add_argument("-eval_seed", type=int, default=42, help="Seed for evaluation episodes")
+    parser.add_argument("--use_adamae", action="store_true", help="Use AdaMAEStorm world model during evaluation")
     args = parser.parse_args()
     conf = load_config(args.config_path)
     print(colorama.Fore.RED + str(args) + colorama.Style.RESET_ALL)
@@ -134,7 +135,7 @@ if __name__ == "__main__":
     import train
     dummy_env = build_single_env(args.env_name, conf.BasicSettings.ImageSize)
     action_dim = dummy_env.action_space.n
-    world_model = train.build_world_model(conf, action_dim)
+    world_model = train.build_world_model(conf, action_dim, use_adamae=args.use_adamae)
     agent = train.build_agent(conf, action_dim)
     root_path = f"ckpt/{args.run_name}"
 
