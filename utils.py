@@ -3,6 +3,7 @@ import os
 import numpy as np
 import random
 from tensorboardX import SummaryWriter
+import wandb
 from einops import repeat
 from contextlib import contextmanager
 import time
@@ -26,6 +27,8 @@ class Logger():
     def __init__(self, path) -> None:
         self.writer = SummaryWriter(logdir=path, flush_secs=1)
         self.tag_step = {}
+        # Enable wandb forwarding only if a run has been initialized
+        self._wandb_enabled = wandb.run is not None
 
     def log(self, tag, value):
         if tag not in self.tag_step:
@@ -40,6 +43,23 @@ class Logger():
             self.writer.add_histogram(tag, value, self.tag_step[tag])
         else:
             self.writer.add_scalar(tag, value, self.tag_step[tag])
+        # Forward scalars and histograms to wandb (keep media only in TensorBoard)
+        if self._wandb_enabled:
+            try:
+                if "hist" in tag:
+                    if isinstance(value, torch.Tensor):
+                        value = value.detach().cpu().numpy()
+                    wandb.log({tag: wandb.Histogram(value)}, step=self.tag_step[tag])
+                elif (not ("video" in tag or "images" in tag)):
+                    # scalar
+                    if isinstance(value, torch.Tensor):
+                        value = value.item()
+                    if isinstance(value, (np.floating, np.integer)):
+                        value = value.item()
+                    wandb.log({tag: value}, step=self.tag_step[tag])
+            except Exception:
+                # Never let logging crash training
+                pass
 
 
 class EMAScalar():

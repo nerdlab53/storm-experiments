@@ -10,3 +10,4 @@ einops
 tqdm
 opencv-python
 gymnasium[atari,accept-rom-license]
+wandb

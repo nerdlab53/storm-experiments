@@ -19,6 +19,7 @@ from sub_models.functions_losses import symexp
 from sub_models.world_models import WorldModel, MSELoss
 from sub_models.world_models_adamae import WorldModel as AdaMAESTORM
 from device_utils import move_to_device, print_device_info
+import wandb
 
 
 def build_single_env(env_name, image_size, seed):
@@ -242,10 +243,34 @@ if __name__ == "__main__":
 
     # set seed
     seed_np_torch(seed=args.seed)
-    # tensorboard writer
+    # Initialize Weights & Biases (optional if WANDB_DISABLED=1)
+    wandb_mode = os.environ.get("WANDB_MODE", "online")
+    try:
+        wandb.init(project=os.environ.get("WANDB_PROJECT", "storm"),
+                   name=args.n,
+                   config={},
+                   mode=wandb_mode)
+    except Exception:
+        pass
+    # tensorboard writer (kept as is)
     logger = Logger(path=f"runs/{args.n}")
     # copy config file
     shutil.copy(args.config_path, f"runs/{args.n}/config.yaml")
+
+    # Log config and args to wandb if active
+    if wandb.run is not None:
+        try:
+            # yacs CfgNode -> dict
+            wandb.config.update({"args": vars(args)}, allow_val_change=True)
+            # Best-effort deep conversion of CfgNode
+            def cfg_to_dict(cfg):
+                try:
+                    return cfg.to_dict()
+                except Exception:
+                    return {}
+            wandb.config.update({"config": cfg_to_dict(conf)}, allow_val_change=True)
+        except Exception:
+            pass
 
     # distinguish between tasks, other debugging options are removed for simplicity
     if conf.Task == "JointTrainAgent":

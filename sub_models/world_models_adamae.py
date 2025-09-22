@@ -7,9 +7,9 @@ from einops.layers.torch import Rearrange
 from torch.cuda.amp import autocast
 
 from sub_models.functions_losses import SymLogTwoHotLoss
-from sub_models.attention_blocks import get_subsequent_mask_with_batch_length, get_subsequent_mask, get_fixed_mask_causal, get_per_head_fixed_mask_causal
+from sub_models.attention_blocks import get_subsequent_mask_with_batch_length, get_subsequent_mask, get_per_head_fixed_mask_causal
 from sub_models.transformer_model import StochasticTransformerKVCacheProgressive
-from device_utils import get_device, get_device_type, get_autocast_dtype, is_autocast_enabled, move_to_device, DEVICE, DEVICE_TYPE, AUTOCAST_ENABLED, AUTOCAST_DTYPE
+from device_utils import DEVICE, DEVICE_TYPE, AUTOCAST_ENABLED, AUTOCAST_DTYPE
 import agents
 
 
