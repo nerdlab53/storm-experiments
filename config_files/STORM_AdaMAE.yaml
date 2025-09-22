@@ -6,9 +6,9 @@ BasicSettings:
   ReplayBufferOnGPU: True
 
 JointTrainAgent:
-  SampleMaxSteps: 50000
-  BufferMaxLength: 50000
-  BufferWarmUp: 1024  
+  SampleMaxSteps: 25000
+  BufferMaxLength: 25000
+  BufferWarmUp: 1024
   NumEnvs: 1
   BatchSize: 16
   DemonstrationBatchSize: 4
@@ -20,7 +20,7 @@ JointTrainAgent:
   TrainDynamicsEverySteps: 1
   TrainAgentEverySteps: 1
   UseDemonstration: False
-  SaveEverySteps: 5000
+  SaveEverySteps: 2500
 
 Models:
   WorldModel:
@@ -30,11 +30,11 @@ Models:
     TransformerNumLayers: 2
     TransformerNumHeads: 8
     # progressive masking
-    UseProgressiveMasking: True
+    UseProgressiveMasking: False
     UseProgressiveInKVCache: False
     UseMildDecayInKV: False
-    FixedMaskPercent: 0.15  # Change this for 0%, 5%, 15%, etc.
-    UseRandomMask: True    # oldest-first masking  
+    FixedMaskPercent: 0.0  # Change this for 0%, 5%, 15%, etc.
+    UseRandomMask: False    # oldest-first masking  
     UseSoftPenalty: False    # soft penalties
 
   Agent:
