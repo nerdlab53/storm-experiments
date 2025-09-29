@@ -27,8 +27,13 @@ class Logger():
     def __init__(self, path) -> None:
         self.writer = SummaryWriter(logdir=path, flush_secs=1)
         self.tag_step = {}
+        self.global_step = 0
         # Enable wandb forwarding only if a run has been initialized
         self._wandb_enabled = wandb.run is not None
+
+    def set_global_step(self, step: int):
+        # Set a unified global step for WandB so metrics line up on the same x-axis
+        self.global_step = int(step)
 
     def log(self, tag, value):
         if tag not in self.tag_step:
@@ -37,6 +42,21 @@ class Logger():
             self.tag_step[tag] += 1
         if "video" in tag:
             self.writer.add_video(tag, value, self.tag_step[tag], fps=15)
+            # Also log video to wandb if available
+            if self._wandb_enabled:
+                try:
+                    arr = value
+                    # Expecting (B, T, C, H, W) or (T, C, H, W). Reduce to single sequence if needed
+                    if isinstance(arr, torch.Tensor):
+                        arr = arr.detach().cpu().numpy()
+                    if arr.ndim == 5:
+                        # take the first sequence and convert to (T, H, W, C)
+                        arr = arr[0]  # (T, C, H, W)
+                    if arr.ndim == 4 and arr.shape[1] in (1, 3):
+                        arr = arr.transpose(0, 2, 3, 1)  # (T, H, W, C)
+                    wandb.log({tag: wandb.Video(arr, fps=15, format="gif")}, step=self.tag_step[tag])
+                except Exception:
+                    pass
         elif "images" in tag:
             self.writer.add_images(tag, value, self.tag_step[tag])
         elif "hist" in tag:
@@ -49,14 +69,14 @@ class Logger():
                 if "hist" in tag:
                     if isinstance(value, torch.Tensor):
                         value = value.detach().cpu().numpy()
-                    wandb.log({tag: wandb.Histogram(value)}, step=self.tag_step[tag])
+                    wandb.log({tag: wandb.Histogram(value)}, step=self.global_step)
                 elif (not ("video" in tag or "images" in tag)):
                     # scalar
                     if isinstance(value, torch.Tensor):
                         value = value.item()
                     if isinstance(value, (np.floating, np.integer)):
                         value = value.item()
-                    wandb.log({tag: value}, step=self.tag_step[tag])
+                    wandb.log({tag: value}, step=self.global_step)
             except Exception:
                 # Never let logging crash training
                 pass

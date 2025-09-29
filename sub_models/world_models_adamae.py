@@ -16,7 +16,7 @@ import agents
 class EncoderBN(nn.Module):
     def __init__(self, in_channels, stem_channels, final_feature_width) -> None:
         super().__init__()
-
+ 
         backbone = []
         # stem
         backbone.append(

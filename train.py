@@ -60,10 +60,18 @@ def world_model_imagine_data(replay_buffer: ReplayBuffer,
     world_model.eval()
     agent.eval()
 
-    sample_obs, sample_action, sample_reward, sample_termination = replay_buffer.sample(
-        imagine_batch_size, imagine_demonstration_batch_size, imagine_context_length)
+    # If we are logging video, also fetch ground-truth future segment for side-by-side comparison
+    total_length = imagine_context_length + (imagine_batch_length if log_video else 0)
+    sample_obs_full, sample_action_full, _, _ = replay_buffer.sample(
+        imagine_batch_size, imagine_demonstration_batch_size, max(imagine_context_length, total_length))
+    # Split into context and future
+    context_obs_np = sample_obs_full[:, :imagine_context_length]
+    context_action_np = sample_action_full[:, :imagine_context_length]
+    gt_future_obs_np = sample_obs_full[:, imagine_context_length:imagine_context_length+imagine_batch_length] if log_video else None
+    gt_future_action_np = sample_action_full[:, imagine_context_length:imagine_context_length+imagine_batch_length] if log_video else None
+
     # Convert observations from H W C to C H W format for the encoder
-    sample_obs = rearrange(sample_obs, "B L H W C -> B L C H W")
+    sample_obs = rearrange(context_obs_np, "B L H W C -> B L C H W")
     latent, action, reward_hat, termination_hat = world_model.imagine_data(
         agent, sample_obs, sample_action,
         imagine_batch_size=imagine_batch_size+imagine_demonstration_batch_size,
@@ -71,6 +79,54 @@ def world_model_imagine_data(replay_buffer: ReplayBuffer,
         log_video=log_video,
         logger=logger
     )
+    # Side-by-side GT vs Predicted (teacher-forced rollout using GT actions)
+    if log_video:
+        try:
+            B = context_obs_np.shape[0]
+            # Prepare tensors
+            context_obs = move_to_device(torch.tensor(context_obs_np))  # B, Lc, H, W, C
+            context_obs = rearrange(context_obs, "B L H W C -> B L C H W") / 255.0
+            context_action = move_to_device(torch.tensor(context_action_np))  # B, Lc
+            gt_future_obs = None
+            gt_future_action = None
+            if gt_future_obs_np is not None:
+                gt_future_obs = move_to_device(torch.tensor(gt_future_obs_np))  # B, Lf, H, W, C
+                gt_future_obs = rearrange(gt_future_obs, "B L H W C -> B L C H W") / 255.0
+            if gt_future_action_np is not None:
+                gt_future_action = move_to_device(torch.tensor(gt_future_action_np))  # B, Lf
+
+            if gt_future_obs is not None and gt_future_action is not None and gt_future_obs.shape[1] > 0:
+                # Reset KV cache and advance through context using GT actions
+                world_model.storm_transformer.reset_kv_cache_list(B, dtype=world_model.tensor_dtype)
+                context_latent = world_model.encode_obs(context_obs)
+                for i in range(context_action.shape[1]):
+                    _, _, _, last_latent, last_dist_feat = world_model.predict_next(
+                        context_latent[:, i:i+1], context_action[:, i:i+1], log_video=True)
+                # Teacher-forced rollout following GT actions and decode predicted frames
+                pred_list = []
+                gt_list = []
+                for t in range(gt_future_action.shape[1]):
+                    last_obs_hat, _, _, last_latent, last_dist_feat = world_model.predict_next(
+                        last_latent, gt_future_action[:, t:t+1], log_video=True)
+                    pred_list.append(last_obs_hat)
+                    gt_list.append(gt_future_obs[:, t:t+1])
+
+                # Stack time dimension
+                pred_video = torch.cat(pred_list, dim=1)  # B, T, C, H, W
+                gt_video = torch.cat(gt_list, dim=1)      # B, T, C, H, W
+
+                # Uniformly sample up to 16 sequences across batch like existing logging
+                stride = max(1, B // 16)
+                pred_video = pred_video[::stride]
+                gt_video = gt_video[::stride]
+
+                # Side-by-side along width: (B, T, C, H, 2W)
+                side_by_side = torch.cat([gt_video, pred_video], dim=4).clamp(0, 1)
+                logger.log("Imagine/gt_vs_pred_video", side_by_side.cpu().float().detach().numpy())
+        except Exception:
+            # Never let logging break training
+            pass
+
     return latent, action, None, None, reward_hat, termination_hat
 
 
@@ -96,6 +152,8 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
     context_action = deque(maxlen=16)
     # sample and train
     for total_steps in tqdm(range(max_steps//num_envs)):
+        # sync global step for wandb so scalar logs align
+        logger.set_global_step(total_steps * num_envs)
         # sample part >>>
         if replay_buffer.ready():
             world_model.eval()
@@ -127,8 +185,9 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
         if done_flag.any():
             for i in range(num_envs):
                 if done_flag[i]:
-                    logger.log(f"sample/{env_name}_reward", sum_reward[i])
-                    logger.log(f"sample/{env_name}_episode_steps", current_info["episode_frame_number"][i]//4)  # framskip=4
+                    # Log episodic metrics at episode boundaries; keep TB step per-tag and WandB step via global_step
+                    logger.log(f"sample/{env_name}_reward", float(sum_reward[i]))
+                    logger.log(f"sample/{env_name}_episode_steps", int(current_info["episode_frame_number"][i]//4))  # frameskip=4
                     logger.log("replay_buffer/length", len(replay_buffer))
                     sum_reward[i] = 0
 
