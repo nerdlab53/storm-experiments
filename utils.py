@@ -123,6 +123,12 @@ def load_config(config_path):
     conf.Models.WorldModel.FixedMaskPercent = 0.0
     conf.Models.WorldModel.UseRandomMask = False
     conf.Models.WorldModel.UseSoftPenalty = True
+    # AdaMAE spatial masking parameters
+    conf.Models.WorldModel.UseMaskSchedule = False
+    conf.Models.WorldModel.MaskRatio = 0.75
+    conf.Models.WorldModel.MaskRatioStart = 0.25
+    conf.Models.WorldModel.MaskRatioEnd = 0.75
+    conf.Models.WorldModel.MaskWarmupSteps = 20000
 
     conf.Models.Agent = CN()
     conf.Models.Agent.NumLayers = 0
