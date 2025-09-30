@@ -42,21 +42,19 @@ class Logger():
             self.tag_step[tag] += 1
         if "video" in tag:
             self.writer.add_video(tag, value, self.tag_step[tag], fps=15)
-            # Also log video to wandb if available
-            if self._wandb_enabled:
-                try:
-                    arr = value
-                    # Expecting (B, T, C, H, W) or (T, C, H, W). Reduce to single sequence if needed
-                    if isinstance(arr, torch.Tensor):
-                        arr = arr.detach().cpu().numpy()
-                    if arr.ndim == 5:
-                        # take the first sequence and convert to (T, H, W, C)
-                        arr = arr[0]  # (T, C, H, W)
-                    if arr.ndim == 4 and arr.shape[1] in (1, 3):
-                        arr = arr.transpose(0, 2, 3, 1)  # (T, H, W, C)
-                    wandb.log({tag: wandb.Video(arr, fps=15, format="gif")}, step=self.tag_step[tag])
-                except Exception:
-                    pass
+            # WandB video upload disabled for performance (videos still in TensorBoard)
+            # if self._wandb_enabled:
+            #     try:
+            #         arr = value
+            #         if isinstance(arr, torch.Tensor):
+            #             arr = arr.detach().cpu().numpy()
+            #         if arr.ndim == 5:
+            #             arr = arr[0]
+            #         if arr.ndim == 4 and arr.shape[1] in (1, 3):
+            #             arr = arr.transpose(0, 2, 3, 1)
+            #         wandb.log({tag: wandb.Video(arr, fps=15, format="gif")}, step=self.tag_step[tag])
+            #     except Exception:
+            #         pass
         elif "images" in tag:
             self.writer.add_images(tag, value, self.tag_step[tag])
         elif "hist" in tag:
