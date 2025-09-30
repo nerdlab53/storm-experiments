@@ -162,7 +162,7 @@ if __name__ == "__main__":
         )
         results.append([step, episode_avg_return])
     
-    os.mkdir('eval_result', exist_ok=True)
+    os.makedirs('eval_result', exist_ok=True)
     with open(f"eval_result/{args.run_name}.csv", "w") as fout:
         fout.write("step, episode_avg_return\n")
         for step, episode_avg_return in results:

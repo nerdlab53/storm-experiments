@@ -310,7 +310,12 @@ class WorldModel(nn.Module):
         self.sampler_grid = 4
         self.num_tokens_per_frame = self.sampler_grid * self.sampler_grid
         self.token_dim = self.encoder.last_channels
-        self.mask_ratio = 0.75 # the masking percentage for the sampler
+        self.mask_ratio = 0.50 # the masking percentage for the sampler (target or fixed)
+        # Adaptive masking schedule (set use_mask_schedule=True to enable)
+        self.use_mask_schedule = False
+        self.mask_ratio_start = 0.25
+        self.mask_ratio_end = 0.75
+        self.mask_warmup_steps = 20000
         self.spatial_pos = nn.Embedding(self.num_tokens_per_frame, self.token_dim)
         self.sampler_mha = nn.MultiheadAttention(self.token_dim, num_heads=4, batch_first=True)
         self.sampler_ffn = nn.Sequential(
@@ -329,6 +334,15 @@ class WorldModel(nn.Module):
     # adamae specific parameters end
 
     # adamae specific functions start
+    def get_current_mask_ratio(self, current_step):
+        """Get mask ratio based on training schedule"""
+        if not self.use_mask_schedule:
+            return self.mask_ratio
+        
+        progress = min(1.0, current_step / self.mask_warmup_steps)
+        current_ratio = self.mask_ratio_start + progress * (self.mask_ratio_end - self.mask_ratio_start)
+        return current_ratio
+    
     def _tokens_from_embedding(self, embedding):
         # [B, L, C*4*4] -> [B, L, 16, C]
         B, L, F = embedding.shape
@@ -337,6 +351,7 @@ class WorldModel(nn.Module):
         # x = [B, L, C, 4, 4] -> [B, L, 4, 4, C] -> [B, L, C, 16]
         x = x.permute(0, 1, 3, 4, 2).contiguous().view(B, L, C * self.sampler_grid * self.sampler_grid)
         return x
+
     
     def _embedding_from_tokens(self, tokens):
         # [B, L, 16, C] -> [B, L, C*4*4]
@@ -354,7 +369,7 @@ class WorldModel(nn.Module):
         M.scatter_(2, v, False)
         return v, M
         
-    def _apply_adaptive_sampling(self, embedding, *, return_aux=False):
+    def _apply_adaptive_sampling(self, embedding, *, return_aux=False, current_step=0):
         # embedding: [B, L, C*H*W] with H=W=self.final_feature_width (default H=W=4)
         # goal: return masked_embedding with the same shape [B, L, C*H*W]
         # tokens: reshape spatially -> [B, L, N, C], where N = H*W (=16)
@@ -384,8 +399,10 @@ class WorldModel(nn.Module):
             rearrange(logits, '(B L) N -> B L N', B=tokens.shape[0], L=tokens.shape[1]),
             dim=-1
         )
+        # Get current mask ratio (scheduled or fixed)
+        current_mask_ratio = self.get_current_mask_ratio(current_step)
         # Iv: visible indices [B, L, k]; M: boolean mask over tokens [B, L, N] (True=masked)
-        Iv, M = self._sample_visible(p, rho=self.mask_ratio)
+        Iv, M = self._sample_visible(p, rho=current_mask_ratio)
         # tokens_masked: zero masked tokens -> [B, L, N, C]
         tokens_masked = tokens.masked_fill(M.unsqueeze(-1), 0.0)
         # masked_embedding: restore flattened spatial layout -> [B, L, C*H*W]
@@ -398,13 +415,13 @@ class WorldModel(nn.Module):
             return masked_embedding
         # logp_mask: mean log-probability of chosen masked tokens -> scalar []
         logp_mask = torch.log(p.clamp_min(1e-9))[M].mean()
-        return masked_embedding, {'p': p, 'M': M, 'Iv': Iv, 'logp_mask': logp_mask}
+        return masked_embedding, {'p': p, 'M': M, 'Iv': Iv, 'logp_mask': logp_mask, 'mask_ratio': current_mask_ratio}
     # adamae specific functions end
     # encode_obs for adamae start
-    def encode_obs(self, obs):
+    def encode_obs(self, obs, current_step=0):
         with torch.autocast(device_type=self.device_type, dtype=self.tensor_dtype, enabled=self.use_amp):
             embedding = self.encoder(obs)  # [B, L, C*4*4]
-            embedding = self._apply_adaptive_sampling(embedding)
+            embedding = self._apply_adaptive_sampling(embedding, current_step=current_step)
             post_logits = self.dist_head.forward_post(embedding)                    # [B, L, K, Cq]
             sample = self.stright_throught_gradient(post_logits, sample_mode='random_sample')
             flattened_sample = self.flatten_sample(sample)                           # [B, L, K*Cq]
@@ -531,7 +548,7 @@ class WorldModel(nn.Module):
 
         return torch.cat([self.latent_buffer, self.hidden_buffer], dim=-1), self.action_buffer, self.reward_hat_buffer, self.termination_hat_buffer
 
-    def update(self, obs, action, reward, termination, progressive_mask=None, logger=None):
+    def update(self, obs, action, reward, termination, progressive_mask=None, logger=None, current_step=0):
         if progressive_mask is None:
             progressive_mask = self.use_progressive_masking
             
@@ -542,7 +559,7 @@ class WorldModel(nn.Module):
             # encoding
             embedding = self.encoder(obs)
             # adaptive sampling step starts
-            embedding, aux = self._apply_adaptive_sampling(embedding, return_aux=True)
+            embedding, aux = self._apply_adaptive_sampling(embedding, return_aux=True, current_step=current_step)
             # adaptive sampling step ends
             post_logits = self.dist_head.forward_post(embedding)
             sample = self.stright_throught_gradient(post_logits, sample_mode="random_sample")
@@ -599,4 +616,5 @@ class WorldModel(nn.Module):
             logger.log("WorldModel/adaptive_sampling_loss", float(L_S.detach()))
             logger.log("WorldModel/adaptive_sampling_loss_weighted", float((1e-4 * L_S).detach()))
             logger.log("WorldModel/total_loss", total_loss.item())
+            logger.log("WorldModel/current_mask_ratio", aux['mask_ratio'])
         # finish

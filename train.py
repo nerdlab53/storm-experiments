@@ -41,11 +41,11 @@ def build_vec_env(env_name, image_size, num_envs, seed):
     return vec_env
 
 
-def train_world_model_step(replay_buffer: ReplayBuffer, world_model: WorldModel, batch_size, demonstration_batch_size, batch_length, logger):
+def train_world_model_step(replay_buffer: ReplayBuffer, world_model: WorldModel, batch_size, demonstration_batch_size, batch_length, logger, current_step=0):
     obs, action, reward, termination = replay_buffer.sample(batch_size, demonstration_batch_size, batch_length)
     # Convert observations from H W C to C H W format for the encoder
     obs = rearrange(obs, "B L H W C -> B L C H W")
-    world_model.update(obs, action, reward, termination, logger=logger)
+    world_model.update(obs, action, reward, termination, logger=logger, current_step=current_step)
 
 
 @torch.no_grad()
@@ -205,7 +205,8 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
                 batch_size=batch_size,
                 demonstration_batch_size=demonstration_batch_size,
                 batch_length=batch_length,
-                logger=logger
+                logger=logger,
+                current_step=total_steps * num_envs
             )
         # <<< train world model part
 
@@ -249,20 +250,37 @@ def joint_train_world_model_agent(env_name, max_steps, num_envs, image_size,
 def build_world_model(conf, action_dim, use_adamae=False):
     model_cls = AdaMAESTORM if use_adamae else WorldModel
     print(colorama.Fore.CYAN + f"Using {'AdaMAEStorm' if use_adamae else 'STORM'} world model" + colorama.Style.RESET_ALL)
-    world_model = move_to_device(model_cls(
-        in_channels=conf.Models.WorldModel.InChannels,
-        action_dim=action_dim,
-        transformer_max_length=conf.Models.WorldModel.TransformerMaxLength,
-        transformer_hidden_dim=conf.Models.WorldModel.TransformerHiddenDim,
-        transformer_num_layers=conf.Models.WorldModel.TransformerNumLayers,
-        transformer_num_heads=conf.Models.WorldModel.TransformerNumHeads,
-        use_progressive_masking=getattr(conf.Models.WorldModel, 'UseProgressiveMasking', True),
-        use_progressive_in_kv=getattr(conf.Models.WorldModel, 'UseProgressiveInKVCache', False),
-        use_mild_decay_in_kv=getattr(conf.Models.WorldModel, 'UseMildDecayInKV', False),
-        fixed_mask_percent=getattr(conf.Models.WorldModel, 'FixedMaskPercent', 0.0),
-        use_random_mask=getattr(conf.Models.WorldModel, 'UseRandomMask', False),
-        use_soft_penalty=getattr(conf.Models.WorldModel, 'UseSoftPenalty', True)
-    ))
+    
+    base_args = {
+        'in_channels': conf.Models.WorldModel.InChannels,
+        'action_dim': action_dim,
+        'transformer_max_length': conf.Models.WorldModel.TransformerMaxLength,
+        'transformer_hidden_dim': conf.Models.WorldModel.TransformerHiddenDim,
+        'transformer_num_layers': conf.Models.WorldModel.TransformerNumLayers,
+        'transformer_num_heads': conf.Models.WorldModel.TransformerNumHeads,
+        'use_progressive_masking': getattr(conf.Models.WorldModel, 'UseProgressiveMasking', True),
+        'use_progressive_in_kv': getattr(conf.Models.WorldModel, 'UseProgressiveInKVCache', False),
+        'use_mild_decay_in_kv': getattr(conf.Models.WorldModel, 'UseMildDecayInKV', False),
+        'fixed_mask_percent': getattr(conf.Models.WorldModel, 'FixedMaskPercent', 0.0),
+        'use_random_mask': getattr(conf.Models.WorldModel, 'UseRandomMask', False),
+        'use_soft_penalty': getattr(conf.Models.WorldModel, 'UseSoftPenalty', True)
+    }
+    
+    world_model = move_to_device(model_cls(**base_args))
+    
+    # Configure AdaMAE-specific mask schedule if using AdaMAE
+    if use_adamae:
+        world_model.use_mask_schedule = getattr(conf.Models.WorldModel, 'UseMaskSchedule', False)
+        world_model.mask_ratio = getattr(conf.Models.WorldModel, 'MaskRatio', 0.50)
+        world_model.mask_ratio_start = getattr(conf.Models.WorldModel, 'MaskRatioStart', 0.25)
+        world_model.mask_ratio_end = getattr(conf.Models.WorldModel, 'MaskRatioEnd', 0.75)
+        world_model.mask_warmup_steps = getattr(conf.Models.WorldModel, 'MaskWarmupSteps', 20000)
+        
+        if world_model.use_mask_schedule:
+            print(colorama.Fore.MAGENTA + f"AdaMAE adaptive masking: {world_model.mask_ratio_start:.0%} → {world_model.mask_ratio_end:.0%} over {world_model.mask_warmup_steps} steps" + colorama.Style.RESET_ALL)
+        else:
+            print(colorama.Fore.MAGENTA + f"AdaMAE fixed masking: {world_model.mask_ratio:.0%}" + colorama.Style.RESET_ALL)
+    
     return world_model
 
 
