@@ -1,0 +1,76 @@
+Task: "JointTrainAgent"
+
+BasicSettings:
+  Seed: 0
+  ImageSize: 64
+  ReplayBufferOnGPU: True
+
+JointTrainAgent:
+  SampleMaxSteps: 50000
+  BufferMaxLength: 50000
+  BufferWarmUp: 1024
+  NumEnvs: 1
+  BatchSize: 16
+  DemonstrationBatchSize: 4
+  BatchLength: 64
+  ImagineBatchSize: 1024
+  ImagineDemonstrationBatchSize: 256
+  ImagineContextLength: 8
+  ImagineBatchLength: 16
+  TrainDynamicsEverySteps: 1
+  TrainAgentEverySteps: 1
+  UseDemonstration: False
+  SaveEverySteps: 2500
+
+Models:
+  WorldModel:
+    InChannels: 3
+    TransformerMaxLength: 64
+    TransformerHiddenDim: 512
+    TransformerNumLayers: 2
+    TransformerNumHeads: 8
+    # Progressive masking (temporal attention masking)
+    UseProgressiveMasking: False
+    UseProgressiveInKVCache: False
+    UseMildDecayInKV: False
+    FixedMaskPercent: 0.0
+    UseRandomMask: False
+    UseSoftPenalty: False
+    # AdaMAE-specific settings (8×8 = 64 tokens)
+    MaskRatio: 0.50            # 50% masking = 32 visible tokens (MAX allowed)
+    UseMaskSchedule: False     # Fixed ratio (not scheduled)
+    UseMaskNet: False          # DISABLED: Use fixed mask ratio, learn which tokens only
+    MaskRatioStart: 0.10       # Not used when UseMaskSchedule=False
+    MaskRatioEnd: 0.50         # Not used when UseMaskSchedule=False
+    MaskWarmupSteps: 20000     # Not used when UseMaskSchedule=False
+
+  Agent:
+    NumLayers: 2
+    HiddenDim: 512
+    Gamma: 0.985
+    Lambda: 0.95
+    EntropyCoef: 3E-4
+
+  NoveltyDetection:
+    Enabled: True
+    HistoryLength: 100
+    DetectionThresholdPercentile: 95.0
+    MinSamplesForDetection: 50
+    EnableAdaptiveThreshold: True
+    EIGThreshold: 0.0
+    UseEIGPrimary: True
+    LogDetections: True
+    SaveDetectionLog: True
+    DetectionLogPath: "detection_logs/"
+
+NoveltyTesting:
+  Enabled: False
+  NoveltyType: "visual_noise"
+  NoveltyParams:
+    noise_std: 30.0
+    shift_type: "red"
+    mask_ratio: 0.3
+    kernel_size: 15
+    angle: 15.0
+  NoveltyStartStep: 100
+

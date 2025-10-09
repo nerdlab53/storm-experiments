@@ -272,14 +272,20 @@ def build_world_model(conf, action_dim, use_adamae=False):
     if use_adamae:
         world_model.use_mask_schedule = getattr(conf.Models.WorldModel, 'UseMaskSchedule', False)
         world_model.mask_ratio = getattr(conf.Models.WorldModel, 'MaskRatio', 0.50)
-        world_model.mask_ratio_start = getattr(conf.Models.WorldModel, 'MaskRatioStart', 0.25)
-        world_model.mask_ratio_end = getattr(conf.Models.WorldModel, 'MaskRatioEnd', 0.75)
+        world_model.mask_ratio_start = getattr(conf.Models.WorldModel, 'MaskRatioStart', 0.10)
+        world_model.mask_ratio_end = getattr(conf.Models.WorldModel, 'MaskRatioEnd', 0.90)
         world_model.mask_warmup_steps = getattr(conf.Models.WorldModel, 'MaskWarmupSteps', 20000)
+        world_model.use_masknet = getattr(conf.Models.WorldModel, 'UseMaskNet', True)
+        
+        # Log configuration
+        visible_tokens = int(world_model.num_tokens_per_frame * (1 - world_model.mask_ratio))
+        print(colorama.Fore.YELLOW + f"AdaMAE encoder: {world_model.final_feature_width}×{world_model.final_feature_width} = {world_model.num_tokens_per_frame} tokens/frame" + colorama.Style.RESET_ALL)
+        print(colorama.Fore.CYAN + f"MaskNet (learn mask ratio): {'Enabled' if world_model.use_masknet else 'Disabled (fixed ratio)'}" + colorama.Style.RESET_ALL)
         
         if world_model.use_mask_schedule:
             print(colorama.Fore.MAGENTA + f"AdaMAE adaptive masking: {world_model.mask_ratio_start:.0%} → {world_model.mask_ratio_end:.0%} over {world_model.mask_warmup_steps} steps" + colorama.Style.RESET_ALL)
         else:
-            print(colorama.Fore.MAGENTA + f"AdaMAE fixed masking: {world_model.mask_ratio:.0%}" + colorama.Style.RESET_ALL)
+            print(colorama.Fore.MAGENTA + f"AdaMAE fixed masking: {world_model.mask_ratio:.0%} ({visible_tokens} visible tokens)" + colorama.Style.RESET_ALL)
     
     return world_model
 

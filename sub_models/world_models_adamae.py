@@ -230,7 +230,7 @@ class WorldModel(nn.Module):
                  fixed_mask_percent=0.0, fixed_mask_percents=None, use_random_mask=False, use_soft_penalty=True):
         super().__init__()
         self.transformer_hidden_dim = transformer_hidden_dim
-        self.final_feature_width = 4
+        self.final_feature_width = 8
         self.stoch_dim = 32
         self.stoch_flattened_dim = self.stoch_dim*self.stoch_dim
         self.use_amp = AUTOCAST_ENABLED  # Use device-specific autocast setting
@@ -307,15 +307,17 @@ class WorldModel(nn.Module):
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp)
 
     # adamae specific parameters start
-        self.sampler_grid = 4
+        self.sampler_grid = 8
         self.num_tokens_per_frame = self.sampler_grid * self.sampler_grid
         self.token_dim = self.encoder.last_channels
-        self.mask_ratio = 0.50 # the masking percentage for the sampler (target or fixed)
+        self.mask_ratio = 0.50 # the masking percentage for the sampler (50% = 32 visible tokens, MAX allowed)
         # Adaptive masking schedule (set use_mask_schedule=True to enable)
         self.use_mask_schedule = False
-        self.mask_ratio_start = 0.25
-        self.mask_ratio_end = 0.75
+        self.mask_ratio_start = 0.10
+        self.mask_ratio_end = 0.50  # Max 50% masking allowed
         self.mask_warmup_steps = 20000
+        # MaskNet: learn how many tokens to mask (if False, uses fixed mask_ratio)
+        self.use_masknet = True
         self.spatial_pos = nn.Embedding(self.num_tokens_per_frame, self.token_dim)
         self.sampler_mha = nn.MultiheadAttention(self.token_dim, num_heads=4, batch_first=True)
         self.sampler_ffn = nn.Sequential(
@@ -330,6 +332,13 @@ class WorldModel(nn.Module):
             nn.Linear(self.token_dim, self.token_dim // 2),
             nn.ReLU(inplace=True),
             nn.Linear(self.token_dim // 2, 1),
+        )
+        # masking ratio predictor (MaskNet) - learns how many tokens to mask
+        self.mask_ratio_predictor = nn.Sequential(
+            nn.Linear(self.token_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1),
+            nn.Sigmoid()
         )
     # adamae specific parameters end
 
@@ -369,7 +378,7 @@ class WorldModel(nn.Module):
         M.scatter_(2, v, False)
         return v, M
         
-    def _apply_adaptive_sampling(self, embedding, *, return_aux=False, current_step=0):
+    def _apply_adaptive_sampling(self, embedding, global_step, *, return_aux=False, current_step=0, masknet=True):
         # embedding: [B, L, C*H*W] with H=W=self.final_feature_width (default H=W=4)
         # goal: return masked_embedding with the same shape [B, L, C*H*W]
         # tokens: reshape spatially -> [B, L, N, C], where N = H*W (=16)
@@ -399,10 +408,36 @@ class WorldModel(nn.Module):
             rearrange(logits, '(B L) N -> B L N', B=tokens.shape[0], L=tokens.shape[1]),
             dim=-1
         )
-        # Get current mask ratio (scheduled or fixed)
-        current_mask_ratio = self.get_current_mask_ratio(current_step)
+        # Check if MaskNet is enabled
+        predicted_ratio_stats = None  # For logging predicted ratios
+        if masknet == False:
+            # Get current mask ratio (scheduled or fixed)
+            ratio = self.get_current_mask_ratio(current_step)
+            logp_ratio = None  # No gradient for fixed ratio
+        else:
+            if global_step <= 10000:
+                # Warmup phase: fixed 10% masking, no gradient
+                ratio = 0.10
+                logp_ratio = None
+            else:
+                # Learned phase: use ratio predictor
+                global_feat = tokens.mean(dim=2)  # [B, L, C]
+                predicted_ratios = self.mask_ratio_predictor(global_feat)  # [B, L, 1]
+                # MaskNet free to predict any ratio in [0, 1] via Sigmoid
+                ratio_scalar = predicted_ratios.mean()  # Scalar for sampling
+                # Log probability for REINFORCE
+                logp_ratio = torch.log(ratio_scalar.clamp_min(1e-9))
+                # Store statistics for logging
+                predicted_ratio_stats = {
+                    'mean': predicted_ratios.mean(),
+                    'std': predicted_ratios.std(),
+                    'min': predicted_ratios.min(),
+                    'max': predicted_ratios.max()
+                }
+                ratio = ratio_scalar  # Use scalar ratio
+        
         # Iv: visible indices [B, L, k]; M: boolean mask over tokens [B, L, N] (True=masked)
-        Iv, M = self._sample_visible(p, rho=current_mask_ratio)
+        Iv, M = self._sample_visible(p, rho=ratio)
         # tokens_masked: zero masked tokens -> [B, L, N, C]
         tokens_masked = tokens.masked_fill(M.unsqueeze(-1), 0.0)
         # masked_embedding: restore flattened spatial layout -> [B, L, C*H*W]
@@ -415,13 +450,23 @@ class WorldModel(nn.Module):
             return masked_embedding
         # logp_mask: mean log-probability of chosen masked tokens -> scalar []
         logp_mask = torch.log(p.clamp_min(1e-9))[M].mean()
-        return masked_embedding, {'p': p, 'M': M, 'Iv': Iv, 'logp_mask': logp_mask, 'mask_ratio': current_mask_ratio}
+        # Actual mask ratio used (for logging)
+        actual_mask_ratio = M.float().mean()
+        return masked_embedding, {
+            'p': p, 
+            'M': M, 
+            'Iv': Iv, 
+            'logp_mask': logp_mask, 
+            'logp_ratio': logp_ratio,
+            'mask_ratio': actual_mask_ratio,  # Actual ratio for logging
+            'predicted_ratio_stats': predicted_ratio_stats  # Statistics of predicted ratios
+        }
     # adamae specific functions end
     # encode_obs for adamae start
-    def encode_obs(self, obs, current_step=0):
+    def encode_obs(self, obs, global_step=0):
         with torch.autocast(device_type=self.device_type, dtype=self.tensor_dtype, enabled=self.use_amp):
-            embedding = self.encoder(obs)  # [B, L, C*4*4]
-            embedding = self._apply_adaptive_sampling(embedding, current_step=current_step)
+            embedding = self.encoder(obs)  # [B, L, C*8*8]
+            embedding = self._apply_adaptive_sampling(embedding, global_step=global_step, return_aux=False, masknet=self.use_masknet)
             post_logits = self.dist_head.forward_post(embedding)                    # [B, L, K, Cq]
             sample = self.stright_throught_gradient(post_logits, sample_mode='random_sample')
             flattened_sample = self.flatten_sample(sample)                           # [B, L, K*Cq]
@@ -559,7 +604,7 @@ class WorldModel(nn.Module):
             # encoding
             embedding = self.encoder(obs)
             # adaptive sampling step starts
-            embedding, aux = self._apply_adaptive_sampling(embedding, return_aux=True, current_step=current_step)
+            embedding, aux = self._apply_adaptive_sampling(embedding, global_step=current_step, return_aux=True, masknet=self.use_masknet)
             # adaptive sampling step ends
             post_logits = self.dist_head.forward_post(embedding)
             sample = self.stright_throught_gradient(post_logits, sample_mode="random_sample")
@@ -593,9 +638,17 @@ class WorldModel(nn.Module):
             # dyn-rep loss
             dynamics_loss, dynamics_real_kl_div = self.categorical_kl_div_loss(post_logits[:, 1:].detach(), prior_logits[:, :-1])
             representation_loss, representation_real_kl_div = self.categorical_kl_div_loss(post_logits[:, 1:], prior_logits[:, :-1].detach())
-            # loss for the reinforce objective
-            L_S = -aux['logp_mask'] * reconstruction_loss.detach()
-            total_loss = reconstruction_loss + reward_loss + termination_loss + 0.5*dynamics_loss + 0.1*representation_loss + 1e-4 * L_S
+            
+            # REINFORCE losses for adaptive sampling
+            L_S_which = -aux['logp_mask'] * reconstruction_loss.detach()  # Which tokens to mask
+            
+            # Only add ratio loss if it's being learned (not during warmup)
+            if aux['logp_ratio'] is not None:
+                L_S_ratio = -aux['logp_ratio'] * reconstruction_loss.detach()  # How many tokens to mask
+                total_loss = reconstruction_loss + reward_loss + termination_loss + 0.5*dynamics_loss + 0.1*representation_loss + 1e-3 * L_S_which + 1e-3 * L_S_ratio
+            else:
+                L_S_ratio = torch.tensor(0.0, device=obs.device)
+                total_loss = reconstruction_loss + reward_loss + termination_loss + 0.5*dynamics_loss + 0.1*representation_loss + 1e-3 * L_S_which
 
         # gradient descent
         self.scaler.scale(total_loss).backward()
@@ -613,8 +666,22 @@ class WorldModel(nn.Module):
             logger.log("WorldModel/dynamics_real_kl_div", dynamics_real_kl_div.item())
             logger.log("WorldModel/representation_loss", representation_loss.item())
             logger.log("WorldModel/representation_real_kl_div", representation_real_kl_div.item())
-            logger.log("WorldModel/adaptive_sampling_loss", float(L_S.detach()))
-            logger.log("WorldModel/adaptive_sampling_loss_weighted", float((1e-4 * L_S).detach()))
+            logger.log("WorldModel/adaptive_sampling_which_loss", float(L_S_which.detach()))
+            logger.log("WorldModel/adaptive_sampling_ratio_loss", float(L_S_ratio.detach()))
+            logger.log("WorldModel/adaptive_sampling_which_loss_weighted", float((1e-4 * L_S_which).detach()))
+            logger.log("WorldModel/adaptive_sampling_ratio_loss_weighted", float((1e-4 * L_S_ratio).detach()))
             logger.log("WorldModel/total_loss", total_loss.item())
-            logger.log("WorldModel/current_mask_ratio", aux['mask_ratio'])
+            
+            # Masking ratio statistics
+            logger.log("WorldModel/actual_mask_ratio", aux['mask_ratio'].item())  # Actual masking ratio used
+            
+            # Log predicted ratio statistics if available (only during learned phase)
+            if aux['predicted_ratio_stats'] is not None:
+                logger.log("WorldModel/predicted_mask_ratio_mean", aux['predicted_ratio_stats']['mean'].item())
+                logger.log("WorldModel/predicted_mask_ratio_std", aux['predicted_ratio_stats']['std'].item())
+                logger.log("WorldModel/predicted_mask_ratio_min", aux['predicted_ratio_stats']['min'].item())
+                logger.log("WorldModel/predicted_mask_ratio_max", aux['predicted_ratio_stats']['max'].item())
+            
+            # Log training phase
+            logger.log("WorldModel/mask_ratio_warmup_phase", 1.0 if current_step <= 10000 else 0.0)
         # finish
