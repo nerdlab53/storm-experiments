@@ -127,6 +127,7 @@ def load_config(config_path):
     conf.Models.WorldModel.MaskRatioStart = 0.25
     conf.Models.WorldModel.MaskRatioEnd = 0.75
     conf.Models.WorldModel.MaskWarmupSteps = 20000
+    conf.Models.WorldModel.UseMaskNet = False
 
     conf.Models.Agent = CN()
     conf.Models.Agent.NumLayers = 0
