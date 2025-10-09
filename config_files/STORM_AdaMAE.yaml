@@ -36,6 +36,13 @@ Models:
     FixedMaskPercent: 0.0  # Change this for 0%, 5%, 15%, etc.
     UseRandomMask: False    # oldest-first masking  
     UseSoftPenalty: False    # soft penalties
+    # AdaMAE-specific settings
+    MaskRatio: 0.50
+    UseMaskSchedule: False
+    UseMaskNet: False
+    MaskRatioStart: 0.10
+    MaskRatioEnd: 0.90
+    MaskWarmupSteps: 20000
 
   Agent:
     NumLayers: 2
