@@ -45,7 +45,14 @@ def train_world_model_step(replay_buffer: ReplayBuffer, world_model: WorldModel,
     obs, action, reward, termination = replay_buffer.sample(batch_size, demonstration_batch_size, batch_length)
     # Convert observations from H W C to C H W format for the encoder
     obs = rearrange(obs, "B L H W C -> B L C H W")
-    world_model.update(obs, action, reward, termination, logger=logger, current_step=current_step)
+    
+    # Check if world_model is AdaMAE (has use_masknet attribute)
+    if hasattr(world_model, 'use_masknet'):
+        # AdaMAE WorldModel - pass current_step for MaskNet warmup
+        world_model.update(obs, action, reward, termination, logger=logger, current_step=current_step)
+    else:
+        # Standard WorldModel - no current_step parameter
+        world_model.update(obs, action, reward, termination, logger=logger)
 
 
 @torch.no_grad()
