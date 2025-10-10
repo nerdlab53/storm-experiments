@@ -307,7 +307,7 @@ class WorldModel(nn.Module):
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp)
 
     # adamae specific parameters start
-        self.sampler_grid = 8
+        self.sampler_grid = 4
         self.num_tokens_per_frame = self.sampler_grid * self.sampler_grid
         self.token_dim = self.encoder.last_channels
         self.mask_ratio = 0.50 # the masking percentage for the sampler (50% = 32 visible tokens, MAX allowed)
@@ -645,10 +645,10 @@ class WorldModel(nn.Module):
             # Only add ratio loss if it's being learned (not during warmup)
             if aux['logp_ratio'] is not None:
                 L_S_ratio = -aux['logp_ratio'] * reconstruction_loss.detach()  # How many tokens to mask
-                total_loss = reconstruction_loss + reward_loss + termination_loss + 0.5*dynamics_loss + 0.1*representation_loss + 1e-3 * L_S_which + 1e-3 * L_S_ratio
+                total_loss = reconstruction_loss + reward_loss + termination_loss + 0.5*dynamics_loss + 0.1*representation_loss + 0.5 * L_S_which + 0.5 * L_S_ratio
             else:
                 L_S_ratio = torch.tensor(0.0, device=obs.device)
-                total_loss = reconstruction_loss + reward_loss + termination_loss + 0.5*dynamics_loss + 0.1*representation_loss + 1e-3 * L_S_which
+                total_loss = reconstruction_loss + reward_loss + termination_loss + 0.5*dynamics_loss + 0.1*representation_loss + 0.5 * L_S_which
 
         # gradient descent
         self.scaler.scale(total_loss).backward()
