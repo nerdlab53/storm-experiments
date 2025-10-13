@@ -273,6 +273,10 @@ def build_world_model(conf, action_dim, use_adamae=False):
         'use_soft_penalty': getattr(conf.Models.WorldModel, 'UseSoftPenalty', True)
     }
     
+    # Add AdaMAE-specific args for model initialization
+    if use_adamae:
+        base_args['masknet_type'] = getattr(conf.Models.WorldModel, 'MaskNetType', 'mlp')
+    
     world_model = move_to_device(model_cls(**base_args))
     
     # Configure AdaMAE-specific mask schedule if using AdaMAE
@@ -288,6 +292,8 @@ def build_world_model(conf, action_dim, use_adamae=False):
         visible_tokens = int(world_model.num_tokens_per_frame * (1 - world_model.mask_ratio))
         print(colorama.Fore.YELLOW + f"AdaMAE encoder: {world_model.final_feature_width}×{world_model.final_feature_width} = {world_model.num_tokens_per_frame} tokens/frame" + colorama.Style.RESET_ALL)
         print(colorama.Fore.CYAN + f"MaskNet (learn mask ratio): {'Enabled' if world_model.use_masknet else 'Disabled (fixed ratio)'}" + colorama.Style.RESET_ALL)
+        if world_model.use_masknet:
+            print(colorama.Fore.CYAN + f"MaskNet architecture: {world_model.masknet_type}" + colorama.Style.RESET_ALL)
         
         if world_model.use_mask_schedule:
             print(colorama.Fore.MAGENTA + f"AdaMAE adaptive masking: {world_model.mask_ratio_start:.0%} → {world_model.mask_ratio_end:.0%} over {world_model.mask_warmup_steps} steps" + colorama.Style.RESET_ALL)

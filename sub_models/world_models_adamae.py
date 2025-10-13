@@ -12,6 +12,15 @@ from sub_models.transformer_model import StochasticTransformerKVCacheProgressive
 from device_utils import DEVICE, DEVICE_TYPE, AUTOCAST_ENABLED, AUTOCAST_DTYPE
 import agents
 
+class SelfMHA(nn.Module):
+    def __init__(self, d_model, num_heads):
+        super().__init__()
+        self.mha = nn.MultiheadAttention(d_model, num_heads, batch_first=True)
+
+    def forward(self, x):
+        out, _ = self.mha(x, x, x, is_causal=True)
+        return out
+
 
 class EncoderBN(nn.Module):
     def __init__(self, in_channels, stem_channels, final_feature_width) -> None:
@@ -227,10 +236,11 @@ class WorldModel(nn.Module):
     def __init__(self, in_channels, action_dim,
                  transformer_max_length, transformer_hidden_dim, transformer_num_layers, transformer_num_heads,
                  use_progressive_masking=True, use_progressive_in_kv=False, use_mild_decay_in_kv=False,
-                 fixed_mask_percent=0.0, fixed_mask_percents=None, use_random_mask=False, use_soft_penalty=True):
+                 fixed_mask_percent=0.0, fixed_mask_percents=None, use_random_mask=False, use_soft_penalty=True,
+                 masknet_type='mlp'):
         super().__init__()
         self.transformer_hidden_dim = transformer_hidden_dim
-        self.final_feature_width = 8
+        self.final_feature_width = 4
         self.stoch_dim = 32
         self.stoch_flattened_dim = self.stoch_dim*self.stoch_dim
         self.use_amp = AUTOCAST_ENABLED  # Use device-specific autocast setting
@@ -334,12 +344,32 @@ class WorldModel(nn.Module):
             nn.Linear(self.token_dim // 2, 1),
         )
         # masking ratio predictor (MaskNet) - learns how many tokens to mask
-        self.mask_ratio_predictor = nn.Sequential(
-            nn.Linear(self.token_dim, 64),
-            nn.ReLU(),
-            nn.Linear(64, 1),
-            nn.Sigmoid()
-        )
+        self.masknet_type = masknet_type
+        if masknet_type == 'transformer':
+            # Match AdaMAE sampler architecture with residuals and layer norms
+            self.masknet_mha = nn.MultiheadAttention(self.token_dim, num_heads=4, batch_first=True)
+            self.masknet_ffn = nn.Sequential(
+                nn.Linear(self.token_dim, self.token_dim * 2),
+                nn.ReLU(inplace=True),
+                nn.Linear(self.token_dim * 2, self.token_dim),
+            )
+            self.masknet_norm1 = nn.LayerNorm(self.token_dim)
+            self.masknet_norm2 = nn.LayerNorm(self.token_dim)
+            self.masknet_head = nn.Sequential(
+                nn.Linear(self.token_dim, self.token_dim // 2),
+                nn.ReLU(inplace=True),
+                nn.Linear(self.token_dim // 2, 1),
+                nn.Sigmoid()
+            )
+        elif masknet_type == 'mlp':
+            self.mask_ratio_predictor = nn.Sequential(
+                nn.Linear(self.token_dim, 64),
+                nn.ReLU(),
+                nn.Linear(64, 1),
+                nn.Sigmoid()
+            )
+        else:
+            raise ValueError(f"Unknown masknet_type: {masknet_type}")
     # adamae specific parameters end
 
     # adamae specific functions start
@@ -421,8 +451,29 @@ class WorldModel(nn.Module):
                 logp_ratio = None
             else:
                 # Learned phase: use ratio predictor
-                global_feat = tokens.mean(dim=2)  # [B, L, C]
-                predicted_ratios = self.mask_ratio_predictor(global_feat)  # [B, L, 1]
+                if self.masknet_type == 'mlp':
+                    global_feat = tokens.mean(dim=2)  # [B, L, C]
+                    predicted_ratios = self.mask_ratio_predictor(global_feat)  # [B, L, 1]
+                elif self.masknet_type == 'transformer':
+                    # Process spatial tokens with sampler-like architecture
+                    B, L, N, C = tokens.shape
+                    x = rearrange(tokens, 'B L N C -> (B L) N C')
+                    
+                    # Self-attention with residual + norm (like AdaMAE sampler)
+                    attn_out, _ = self.masknet_mha(x, x, x)
+                    x = self.masknet_norm1(x + attn_out)
+                    
+                    # FFN with residual + norm (like AdaMAE sampler)
+                    x = self.masknet_norm2(x + self.masknet_ffn(x))
+                    
+                    # Pool and predict ratio
+                    pooled = x.mean(dim=1)  # [(B L), C]
+                    predicted_ratios = self.masknet_head(pooled)
+                    predicted_ratios = rearrange(predicted_ratios, '(B L) 1 -> B L 1', B=B, L=L)
+
+                # Clamp to max 0.5 (50% masking)
+                predicted_ratios = torch.clamp(predicted_ratios, max=0.5)
+
                 # MaskNet free to predict any ratio in [0, 1] via Sigmoid
                 ratio_scalar = predicted_ratios.mean()  # Scalar for sampling
                 # Log probability for REINFORCE
@@ -645,7 +696,7 @@ class WorldModel(nn.Module):
             # Only add ratio loss if it's being learned (not during warmup)
             if aux['logp_ratio'] is not None:
                 L_S_ratio = -aux['logp_ratio'] * reconstruction_loss.detach()  # How many tokens to mask
-                total_loss = reconstruction_loss + reward_loss + termination_loss + 0.5*dynamics_loss + 0.1*representation_loss + 0.5 * L_S_which + 0.5 * L_S_ratio
+                total_loss = reconstruction_loss + reward_loss + termination_loss + 0.5*dynamics_loss + 0.1*representation_loss + 0.1 * L_S_which + 0.1 * L_S_ratio
             else:
                 L_S_ratio = torch.tensor(0.0, device=obs.device)
                 total_loss = reconstruction_loss + reward_loss + termination_loss + 0.5*dynamics_loss + 0.1*representation_loss + 0.5 * L_S_which
